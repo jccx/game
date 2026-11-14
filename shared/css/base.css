@@ -26,8 +26,8 @@ html, body {
   touch-action: none;
 }
 
-/* 铺满屏幕的根容器。用 dvh 避开手机浏览器地址栏伸缩的问题 */
-.g-root { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; }
+/* 铺满屏幕的根容器。高度优先用脚本量出来的可见高度 --app-h（见 ui.js 的 fitViewport），避免底部被浏览器工具栏盖住 */
+.g-root { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; height: 100dvh; height: var(--app-h, 100dvh); overflow: hidden; }
 .g-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
 
 /* HUD 层：本身不拦截触摸，只有里面的控件拦截 */
@@ -104,7 +104,8 @@ html, body {
 .g-b.sm { min-height: calc(var(--u) * 7.5); padding: 0 calc(var(--u) * 2.6); font-size: calc(var(--u) * 3.1); }
 
 .g-overlay {
-  position: absolute; inset: 0; display: grid; place-items: center;
+  /* 用 flex 居中：这样里面的面板写 max-height: 100% 才会真的被屏幕高度限制住，内容多时在面板内部滚动 */
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(4, 8, 16, .72); z-index: 50; pointer-events: auto;
   padding: calc(var(--st) + var(--u) * 3) calc(var(--sr) + var(--u) * 3) calc(var(--sb) + var(--u) * 3) calc(var(--sl) + var(--u) * 3);
 }

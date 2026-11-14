@@ -47,8 +47,25 @@ export function toast(msg, ms = 1800) {
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms);
 }
 
-/** 游戏页面通用：禁止双击缩放、长按菜单、文字选中、橡皮筋滚动 */
+/**
+ * 把页面高度钉在“实际可见区域”的高度上，写进 CSS 变量 --app-h。
+ * 有些手机浏览器的工具栏会盖住屏幕底部，按 100vh 排版时最下面一截看不到。
+ */
+export function fitViewport() {
+  const set = () => {
+    const vv = window.visualViewport;
+    const h = vv ? Math.min(window.innerHeight, vv.height) : window.innerHeight;
+    document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+  };
+  set();
+  window.addEventListener('resize', set);
+  window.addEventListener('orientationchange', () => setTimeout(set, 150));
+  window.visualViewport?.addEventListener('resize', set);
+}
+
+/** 游戏页面通用：禁止双击缩放、长按菜单、文字选中、橡皮筋滚动；并让页面高度跟随可见区域 */
 export function guardPage() {
+  fitViewport();
   document.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('dblclick', (e) => e.preventDefault());

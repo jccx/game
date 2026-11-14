@@ -29,6 +29,7 @@ export class Unit {
     this.atkSeq = 0;               // 每出手一次加一，渲染层据此播放攻击动作
     this.stunT = 0; this.slowT = 0; this.slowK = 1;
     this.shield = 0; this.shieldT = 0; this.invulnT = 0;
+    this.godT = 0;                 // 作弊无敌的剩余时间：不受伤害、不吃控制，但敌人仍然会来打
     this.moving = false;
     this.lastDamagedT = -99;
     this.dmgTakenMul = 1;
@@ -53,18 +54,19 @@ export class Unit {
     if (this.stunT > 0) this.stunT -= dt;
     if (this.slowT > 0) this.slowT -= dt;
     if (this.invulnT > 0) this.invulnT -= dt;
+    if (this.godT > 0) this.godT -= dt;
     if (this.shieldT > 0) { this.shieldT -= dt; if (this.shieldT <= 0) this.shield = 0; }
   }
 
   /** 眩晕（击飞也按眩晕处理） */
   stun(d) {
-    if (!this.alive || this.invulnT > 0 || this.isStruct) return;
+    if (!this.alive || this.invulnT > 0 || this.godT > 0 || this.isStruct) return;
     this.stunT = Math.max(this.stunT, d);
     this.atkWind = 0;
   }
   /** 减速：k 是速度倍率（0.6 表示减速 40%） */
   slow(k, d) {
-    if (!this.alive || this.isStruct) return;
+    if (!this.alive || this.isStruct || this.godT > 0) return;
     if (this.slowT <= 0 || k < this.slowK) this.slowK = k;
     this.slowT = Math.max(this.slowT, d);
   }
@@ -527,7 +529,7 @@ export class Hero extends Unit {
     this.respawnT = (HERO.respawnBase + this.level * HERO.respawnPerLevel) * this.game.respawnMul;
     this.dash = null; this.atkWind = 0; this.recallT = 0; this.castLock = 0; this.healT = 0;
     this.stunT = 0; this.slowT = 0; this.shield = 0; this.nextAtk = null;
-    this.redT = 0; this.blueT = 0; this.buffs.length = 0;
+    this.redT = 0; this.blueT = 0; this.buffs.length = 0; this.godT = 0;
     this.target = null;
     this.recalc();
   }

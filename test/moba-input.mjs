@@ -80,6 +80,23 @@ for (const vname of ['landscape', 'portrait']) {
   await shot(page, `moba-input-${vname}-shop`);
   await page.evaluate(() => window.__moba.hud.closeOverlay());
 
+  // 作弊按钮：点一下无敌 15 秒，期间不掉血，15 秒后恢复正常
+  const ch = await center('.cheat');
+  await page.touchscreen.tap(ch.x, ch.y);
+  await sleep(500);
+  const god = await page.evaluate(() => {
+    const m = window.__moba, g = m.game, p = g.player, foe = g.heroes.find((h) => h.team === 1);
+    const t = p.godT, hp0 = p.hp;
+    g.damage(foe, p, 800, 'true'); const hp1 = p.hp;
+    p.stun(2); const stunned = p.stunT > 0;
+    m.loop.fastForward(15.5);
+    const tAfter = p.godT, hp2 = p.hp;
+    g.damage(foe, p, 300, 'true');
+    return { t, kept: hp1 === hp0, stunned, tAfter, hurtAfter: p.hp < hp2, label: document.querySelector('.cheat').textContent };
+  });
+  check(god.t > 13 && god.kept && !god.stunned, `${vname} 点作弊按钮后无敌（剩 ${god.t.toFixed(1)} 秒，挨打不掉血、不被眩晕）`, log);
+  check(god.tAfter <= 0 && god.hurtAfter, `${vname} 15 秒后无敌结束，恢复会受伤`, log);
+
   // 回城
   await page.evaluate(() => { const g = window.__moba.game; for (const u of g.units) if (u.kind === 2) u.alive = false; });
   const rb = await center('.sum .b-sm');

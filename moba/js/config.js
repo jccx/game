@@ -90,3 +90,6 @@ export const DIFFICULTY = [
   { name: '普通', think: 0.28, aimErr: 0.14, aggro: 1.0,  dmgMul: 1.0,  combo: 0.8 },
   { name: '困难', think: 0.14, aimErr: 0.05, aggro: 1.2,  dmgMul: 1.0,  combo: 1.0 },
 ];
+
+/** 作弊：屏幕上的“无敌”按钮，按一次无敌多少秒 */
+export const CHEAT = { godTime: 15 };

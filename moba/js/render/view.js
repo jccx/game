@@ -103,6 +103,11 @@ export class View {
     this.towerLine.visible = false; this.towerLine.renderOrder = 4;
     this.scene.add(this.towerRing, this.towerLine);
 
+    // ---- 作弊无敌时罩在玩家身上的金色光罩 ----
+    this.godBubble = new THREE.Mesh(this.fx.geo.sphere, new THREE.MeshBasicMaterial({ color: 0xffd35a, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.godBubble.visible = false; this.godBubble.renderOrder = 5;
+    this.scene.add(this.godBubble);
+
     // ---- 实时阴影（只在“高清”档开启）：一块只显示阴影的透明地面 ----
     const sun = this.world.sun;
     sun.shadow.mapSize.set(1024, 1024);
@@ -215,6 +220,7 @@ export class View {
         break;
       }
       case 'buy': if (ev.u === P) Sfx.play('coin'); break;
+      case 'god': fx.ring(ev.u.x, ev.u.z, 4, 0xffd35a, 0.6); fx.levelUp(ev.u); fx.text(ev.u.x, 4.4, ev.u.z, '无敌！', 'gold'); Sfx.play('levelup'); break;
     }
     this.onEvent(ev);
   }
@@ -249,6 +255,14 @@ export class View {
 
     // ---- 英雄 ----
     for (const v of this.heroViews) this.updateHero(v, alpha, dt);
+    const god = P.alive && P.godT > 0;
+    this.godBubble.visible = god;
+    if (god) {
+      // 快结束的最后 3 秒闪烁提醒
+      this.godBubble.position.set(px, 1.8, pz);
+      this.godBubble.scale.setScalar(2.3 + Math.sin(this.time * 6) * 0.08);
+      this.godBubble.material.opacity = P.godT < 3 ? 0.12 + 0.2 * Math.abs(Math.sin(this.time * 10)) : 0.3;
+    }
 
     // ---- 小兵、野怪、建筑：顺便填写阴影和血条的实例数据 ----
     this.nShadow = 0; this.nBar = 0;

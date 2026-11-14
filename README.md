@@ -38,6 +38,7 @@ node test/mapdebug.mjs      # 裂谷争锋：地图连通性
 node test/moba-sim.mjs 3    # 裂谷争锋：电脑互打整局（不开浏览器）
 node test/moba.mjs          # 裂谷争锋：浏览器里开局、截图
 node test/moba-input.mjs    # 裂谷争锋：模拟触屏操作
+node test/moba-menu.mjs     # 裂谷争锋：五种手机尺寸下菜单和面板不超出屏幕
 ```
 
 浏览器测试默认用 `/usr/bin/google-chrome`，可用环境变量 `CHROME=…` 指定别的浏览器。截图输出到 `test/out/`。

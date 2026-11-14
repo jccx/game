@@ -9,7 +9,7 @@ import { fmtTime } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { KIND } from './entities.js';
 import { ITEMS, ITEM_TYPES, MAX_ITEMS } from './items.js';
-import { HERO, ECON } from './config.js';
+import { HERO, ECON, CHEAT } from './config.js';
 import { paintGround, TEAM_CSS } from './render/scene.js';
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}${extra}</svg>`;
@@ -50,7 +50,7 @@ export class Hud {
     this.root = root; this.game = game; this.view = view; this.api = api;
     this.P = game.player;
     this.keys = api.keys;       // 键盘状态由 main.js 创建一次、各局共用
-    this.pend = { cast: -1, aimX: 0, aimZ: 0, aimTarget: null, lv: -1, buy: null, recall: false, heal: false, flash: false };
+    this.pend = { cast: -1, aimX: 0, aimZ: 0, aimTarget: null, lv: -1, buy: null, recall: false, heal: false, flash: false, god: false };
     this.aim = null;             // 正在拖动瞄准的技能：{ i, ax, ay, mag, cancel }
     this.latch = false; this.latchMode = 0; this.noTargetT = 0;
     this.mouse = { x: 0, y: 0, down: false };
@@ -76,6 +76,8 @@ export class Hud {
     const shopRow = el('div', { cls: 'shop-row' }, left);
     this.quick = el('div', { cls: 'quick g-pe', on: { pointerdown: (e) => { e.preventDefault(); const id = P.nextBuild(); if (id) this.tryBuy(id); } } }, shopRow);
     this.shopBtn = el('div', { cls: 'g-ic', html: ICONS.shop, on: { pointerdown: (e) => { e.preventDefault(); this.openShop(); } } }, shopRow);
+    // 作弊按钮：按一下无敌 15 秒
+    this.cheatEl = el('div', { cls: 'cheat', text: `作弊：无敌 ${CHEAT.godTime} 秒`, on: { pointerdown: (e) => { e.preventDefault(); e.stopPropagation(); this.pend.god = true; } } }, left);
 
     // 上方：比分、时间
     const top = el('div', { cls: 'hud-top' }, r);
@@ -236,6 +238,11 @@ export class Hud {
     if (pd.recall) { inn.recall = true; pd.recall = false; }
     if (pd.heal) { inn.heal = true; pd.heal = false; }
     if (pd.flash) { inn.flash = true; pd.flash = false; }
+    if (pd.god) {
+      pd.god = false;
+      if (P.alive) { P.godT = CHEAT.godTime; P.stunT = 0; P.slowT = 0; this.game.emit({ type: 'god', u: P }); }
+      else toast('复活后再用');
+    }
   }
 
   /** 键盘放技能：朝鼠标所指的地面位置 */
@@ -345,6 +352,11 @@ export class Hud {
       this.quick.style.display = '';
       this.quick.className = 'quick g-pe' + (ok ? ' ok' : '');
       this.quick.innerHTML = `<b>${it.name}</b><span>${it.cost}</span>`;
+    });
+    // 作弊按钮：无敌期间显示倒计时
+    set('god', P.godT > 0 ? Math.ceil(P.godT) : 0, (v) => {
+      this.cheatEl.textContent = v ? `无敌中 ${v} 秒` : `作弊：无敌 ${CHEAT.godTime} 秒`;
+      this.cheatEl.classList.toggle('on', v > 0);
     });
     // 阵亡遮罩
     set('dead', !P.alive, (v) => { this.deadEl.classList.toggle('show', v && !g.over); });

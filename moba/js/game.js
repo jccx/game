@@ -184,6 +184,7 @@ export class Game {
    */
   damage(src, target, amount, type, opts) {
     if (!target.alive || amount <= 0 || target.invulnT > 0) return 0;
+    if (target.godT > 0) return 0;                                  // 作弊无敌中
     const struct = (target.kind & STRUCT) !== 0;
     if (struct && !target.vuln) return 0;
     let dmg = amount;

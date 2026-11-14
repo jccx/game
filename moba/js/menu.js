@@ -18,7 +18,12 @@ export function showMenu(root, portraits, onStart) {
   if (!HERO_BY_ID[sel.hero]) sel.hero = 'liefeng';
   const wrap = el('div', { cls: 'g-overlay menu' }, root);
   const box = el('div', { cls: 'g-panel menu-box' }, wrap);
-  el('div', { cls: 'menu-head', html: '<h1>裂谷争锋</h1><span>5v5 · 3v3 · 1v1　你操控一名英雄，其余由电脑控制</span>' }, box);
+  // 标题和“开始对战”放在最上面：手机浏览器的底部经常被工具栏挡住，按钮放底部容易看不到
+  const head = el('div', { cls: 'menu-head' }, box);
+  el('h1', { text: '裂谷争锋' }, head);
+  const acts = el('div', { cls: 'menu-acts' }, head);
+  el('a', { cls: 'g-b ghost sm', text: '返回大厅', attrs: { href: '../' } }, acts);
+  el('button', { cls: 'g-b gold start', text: '开始对战', on: { click: () => { Sfx.unlock(); Sfx.play('go'); store.set('moba-pick', sel); onStart({ ...sel }); } } }, acts);
   const body = el('div', { cls: 'menu-body g-scroll' }, box);
 
   // 左栏：模式和难度
@@ -36,10 +41,6 @@ export function showMenu(root, portraits, onStart) {
   const heroes = el('div', { cls: 'heroes' }, colB);
   const heroCards = HEROES.map((h) => el('button', { cls: 'hero', html: `<img alt="" src="${portraits[h.id] || ''}"><b>${h.name}</b><span>${h.roleName}</span>`, on: { click: () => { sel.hero = h.id; refresh(); Sfx.unlock(); Sfx.play('click'); } } }, heroes));
   const info = el('div', { cls: 'hero-info' }, colB);
-
-  const foot = el('div', { cls: 'menu-foot' }, box);
-  el('a', { cls: 'g-b ghost', text: '返回大厅', attrs: { href: '../' } }, foot);
-  el('button', { cls: 'g-b gold start', text: '开始对战', on: { click: () => { Sfx.unlock(); Sfx.play('go'); store.set('moba-pick', sel); onStart({ ...sel }); } } }, foot);
 
   function refresh() {
     modeCards.forEach((c, i) => c.classList.toggle('on', MODES[i].id === sel.mode));
