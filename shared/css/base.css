@@ -130,3 +130,21 @@ html, body {
 
 /* 加载提示 */
 .g-loading { position: absolute; inset: 0; display: grid; place-items: center; background: #0a0e18; z-index: 90; color: #9fb4de; font-size: calc(var(--u) * 4); }
+
+/* ---------- 作弊开关按钮（各游戏共用） ---------- */
+.cheat {
+  pointer-events: auto; height: calc(var(--u) * 8.5); min-width: calc(var(--u) * 13); padding: 0 calc(var(--u) * 2.4); border-radius: calc(var(--u) * 2);
+  display: flex; align-items: center; justify-content: center; white-space: nowrap;
+  background: rgba(46,18,70,.78); border: 1px solid rgba(200,150,255,.6); color: #ecd9ff;
+  font-size: calc(var(--u) * 3.1); font-weight: 700; touch-action: manipulation; font-variant-numeric: tabular-nums;
+}
+.cheat:active { filter: brightness(1.4); }
+.cheat.on { background: rgba(90,66,8,.88); border-color: var(--gold); color: var(--gold); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.7); }
+
+/* ---------- 设置面板里的行、分段按钮、按钮组、说明文字 ---------- */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 3); }
+.seg { display: flex; border-radius: calc(var(--u) * 1.8); overflow: hidden; border: 1px solid var(--line); }
+.seg button { flex: 1; min-width: calc(var(--u) * 13); min-height: calc(var(--u) * 9); padding: 0 calc(var(--u) * 2); border: 0; background: rgba(255,255,255,.05); color: #c8d2ea; font: inherit; touch-action: manipulation; }
+.seg button.on { background: #3465c8; color: #fff; font-weight: 700; }
+.set-btns { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 1.6); justify-content: center; }
+.set-tip { font-size: calc(var(--u) * 2.5); color: #8f99b0; line-height: 1.5; }

@@ -52,15 +52,6 @@
 @keyframes pulse { to { box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.75); } }
 .g-ic svg { width: 62%; height: 62%; }
 
-.cheat {
-  pointer-events: auto; height: calc(var(--u) * 8.5); min-width: calc(var(--u) * 13); padding: 0 calc(var(--u) * 2.4); border-radius: calc(var(--u) * 2);
-  display: flex; align-items: center; justify-content: center; white-space: nowrap;
-  background: rgba(46,18,70,.78); border: 1px solid rgba(200,150,255,.6); color: #ecd9ff;
-  font-size: calc(var(--u) * 3.1); font-weight: 700; touch-action: manipulation; font-variant-numeric: tabular-nums;
-}
-.cheat:active { filter: brightness(1.4); }
-.cheat.on { background: rgba(90,66,8,.88); border-color: var(--gold); color: var(--gold); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.7); }
-
 /* ---------- 上方：比分；右上：金币、战绩、设置 ---------- */
 .hud-top {
   position: absolute; left: 50%; top: calc(var(--st) + var(--u) * 1.5); transform: translateX(-50%);
@@ -166,12 +157,6 @@
 .item u { text-decoration: none; color: #8f99b0; font-weight: 700; font-variant-numeric: tabular-nums; }
 .item.ok { border-color: rgba(246,208,106,.6); } .item.ok u { color: var(--gold); }
 .item.own { opacity: .45; } .item.own u::after { content: " 已购"; font-weight: 400; }
-.set-row { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 3); }
-.seg { display: flex; border-radius: calc(var(--u) * 1.8); overflow: hidden; border: 1px solid var(--line); }
-.seg button { flex: 1; min-width: calc(var(--u) * 13); min-height: calc(var(--u) * 9); padding: 0 calc(var(--u) * 2); border: 0; background: rgba(255,255,255,.05); color: #c8d2ea; font: inherit; touch-action: manipulation; }
-.seg button.on { background: #3465c8; color: #fff; font-weight: 700; }
-.set-btns { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 1.6); justify-content: center; }
-.set-tip { font-size: calc(var(--u) * 2.5); color: #8f99b0; line-height: 1.5; }
 .end-title { text-align: center; font-size: calc(var(--u) * 11); font-weight: 900; letter-spacing: .2em; }
 .end-title.win { color: var(--gold); text-shadow: 0 0 calc(var(--u) * 5) rgba(246,208,106,.6); } .end-title.lose { color: #9aa7c2; }
 .end-sub { text-align: center; color: #b9c4dc; font-size: calc(var(--u) * 3); }

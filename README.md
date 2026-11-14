@@ -7,7 +7,7 @@
 | 游戏 | 目录 | 状态 | 说明 |
 |---|---|---|---|
 | 裂谷争锋 | `moba/` | 可玩 | 3D 英雄对战：5v5 三路 / 3v3 单路 / 1v1，五个英雄，你操控一个，其余是电脑 |
-| 落日湾 | `city/` | 制作中 | 开放世界都市：步行、汽车、摩托、飞机、坦克、船，通缉、枪战、任务 |
+| 落日湾 | `city/` | 可玩 | 开放世界都市：步行、汽车、摩托、飞机、坦克、船，通缉、枪战、八个任务 |
 | 疾风卡丁 | `kart/` | 制作中 | 卡丁车竞速：漂移、氮气、道具、电脑对手 |
 | 豆兵大战 | `artillery/` | 制作中 | 回合制炮战：可破坏地形、多种武器、风向 |
 | 梦想乐园 | `park/` | 制作中 | 游乐园经营：铺路、建设施和过山车、管游客和收支 |
@@ -23,6 +23,7 @@ shared/             各游戏共用
                     geo.js（模型搭建工具）、ui.js、util.js
   css/base.css      共用界面样式
 moba/               裂谷争锋（见 moba/README.md）
+city/               落日湾（见 city/README.md）
 test/               测试脚本（无头 Chrome）
 ```
 
@@ -39,6 +40,9 @@ node test/moba-sim.mjs 3    # 裂谷争锋：电脑互打整局（不开浏览�
 node test/moba.mjs          # 裂谷争锋：浏览器里开局、截图
 node test/moba-input.mjs    # 裂谷争锋：模拟触屏操作
 node test/moba-menu.mjs     # 裂谷争锋：五种手机尺寸下菜单和面板不超出屏幕
+node test/citymap.mjs       # 落日湾：生成世界并画出俯视图
+node test/city-sim.mjs      # 落日湾：载具、武器、通缉、任务的规则（不开浏览器）
+node test/city.mjs          # 落日湾：浏览器里开局、触屏操作、各类载具截图
 ```
 
 浏览器测试默认用 `/usr/bin/google-chrome`，可用环境变量 `CHROME=…` 指定别的浏览器。截图输出到 `test/out/`。

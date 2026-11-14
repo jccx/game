@@ -1,0 +1,82 @@
+/* 落日湾的界面样式。尺寸单位 --u 定义在 shared/css/base.css。默认横屏，文件末尾是竖屏的调整。 */
+
+.world-ui { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.wlabel { position: absolute; left: 0; top: 0; padding: calc(var(--u) * .8) calc(var(--u) * 2); border-radius: 999px; background: rgba(60,44,0,.8); border: 1px solid var(--gold); color: var(--gold); font-size: calc(var(--u) * 2.8); font-weight: 700; white-space: nowrap; display: none; }
+
+/* 拖动转镜头的区域：铺满全屏，在最底层 */
+.look { position: absolute; inset: 0; touch-action: none; }
+
+/* ---------- 左上：雷达 ---------- */
+.radar { position: absolute; left: calc(var(--sl) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); width: calc(var(--u) * 30); height: calc(var(--u) * 30); border-radius: 50%; box-shadow: 0 2px 12px rgba(0,0,0,.5); touch-action: manipulation; }
+
+/* ---------- 右上：无敌、钱、设置；通缉星；生命和护甲；武器 ---------- */
+.c-right { position: absolute; right: calc(var(--sr) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 1.2); }
+.g-hud > .c-right, .g-hud > .obj, .g-hud > .c-banner, .g-hud > .speed, .g-hud > .wasted, .g-hud > .prompt, .g-hud > .cpad { pointer-events: none; }
+.c-row { display: flex; align-items: center; gap: calc(var(--u) * 1.5); }
+.c-row > * { pointer-events: auto; }
+.g-ic svg { width: 62%; height: 62%; }
+.money { padding: calc(var(--u) * 1.2) calc(var(--u) * 2.6); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); color: #7dff9a; font-weight: 800; font-size: calc(var(--u) * 3.6); font-variant-numeric: tabular-nums; }
+.stars { font-size: calc(var(--u) * 4.6); line-height: 1; color: #ffd84a; letter-spacing: .08em; text-shadow: 0 1px 3px #000; }
+.stars i { font-style: normal; color: rgba(255,255,255,.28); text-shadow: none; }
+.stars.blink { animation: blink .5s steps(2) infinite; }
+@keyframes blink { to { opacity: .35; } }
+.c-bars { width: calc(var(--u) * 32); display: flex; flex-direction: column; gap: calc(var(--u) * .6); }
+.c-hp, .c-ar { height: calc(var(--u) * 2); background: #0d1018; border: 1px solid #000; border-radius: 99px; overflow: hidden; }
+.c-hp i, .c-ar i { display: block; height: 100%; width: 100%; }
+.c-hp i { background: linear-gradient(#ff8a7a, #d8362c); } .c-ar i { background: linear-gradient(#8fd0ff, #3a86d8); width: 0; }
+.c-wp { padding: calc(var(--u) * .8) calc(var(--u) * 2.2); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); font-size: calc(var(--u) * 3); font-variant-numeric: tabular-nums; }
+
+/* ---------- 任务目标、横幅、速度、倒地 ---------- */
+.obj { position: absolute; left: 50%; top: calc(var(--st) + var(--u) * 2); transform: translateX(-50%); max-width: 44vw; padding: calc(var(--u) * 1.2) calc(var(--u) * 3); border-radius: calc(var(--u) * 2); background: rgba(8,12,22,.7); border: 1px solid var(--line); display: none; text-align: center; }
+.obj b { display: block; color: var(--gold); font-size: calc(var(--u) * 2.8); }
+.obj span { display: block; font-size: calc(var(--u) * 3.3); }
+.obj i { display: block; font-style: normal; font-weight: 800; font-size: calc(var(--u) * 4.6); font-variant-numeric: tabular-nums; color: #cfe3ff; }
+.obj i.low { color: #ff6a5a; animation: blink .4s steps(2) infinite; }
+.c-banner { position: absolute; left: 50%; top: 24%; transform: translate(-50%, -8px); padding: calc(var(--u) * 2) calc(var(--u) * 10); max-width: 92vw; text-align: center; opacity: 0; transition: opacity .25s, transform .25s; background: linear-gradient(90deg, transparent, rgba(8,12,22,.86) 20%, rgba(8,12,22,.86) 80%, transparent); }
+.c-banner.show { opacity: 1; transform: translate(-50%, 0); }
+.c-banner b { display: block; font-size: calc(var(--u) * 6); letter-spacing: .1em; text-shadow: 0 2px 6px #000; }
+.c-banner span { display: block; font-size: calc(var(--u) * 3); color: #d6def2; }
+.c-banner.good b { color: #ffe08a; } .c-banner.bad b { color: #ff7a6a; } .c-banner.info b { color: #cfe3ff; }
+.speed { position: absolute; left: 50%; bottom: calc(var(--sb) + var(--u) * 3); transform: translateX(-50%); padding: calc(var(--u) * 1) calc(var(--u) * 3); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); font-size: calc(var(--u) * 3.4); font-weight: 700; font-variant-numeric: tabular-nums; display: none; white-space: nowrap; }
+.wasted { position: absolute; inset: 0; display: none; place-items: center; align-content: center; gap: calc(var(--u) * 1); background: rgba(90,10,10,.45); text-align: center; }
+.wasted.show { display: grid; }
+.wasted b { font-size: calc(var(--u) * 9); color: #ffb0a6; letter-spacing: .15em; text-shadow: 0 2px 8px #000; } .wasted span { color: #f0d6d2; }
+.g-hud.hurt::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 calc(var(--u) * 22) rgba(255,30,20,.6); }
+.prompt { position: absolute; right: calc(var(--sr) + var(--u) * 6); bottom: calc(var(--sb) + var(--u) * 46); padding: calc(var(--u) * .8) calc(var(--u) * 2.4); border-radius: 999px; background: rgba(8,12,22,.7); border: 1px solid var(--line); font-size: calc(var(--u) * 2.9); display: none; }
+
+/* ---------- 右下：动作键。步行和开车两套按钮共用这几个位置 ---------- */
+.cpad { position: absolute; right: calc(var(--sr) + var(--u) * 2); bottom: calc(var(--sb) + var(--u) * 2); width: calc(var(--u) * 50); height: calc(var(--u) * 46); }
+.cpad > * { pointer-events: auto; }
+.k-main { right: calc(var(--u) * 2); bottom: calc(var(--u) * 2); width: calc(var(--u) * 22); height: calc(var(--u) * 22); border-color: rgba(255,214,150,.75); background: radial-gradient(circle at 35% 28%, rgba(230,150,90,.6), rgba(60,24,14,.85) 70%); }
+.k-left { right: calc(var(--u) * 27); bottom: calc(var(--u) * 3); width: calc(var(--u) * 16); height: calc(var(--u) * 16); }
+.k-top { right: calc(var(--u) * 5); bottom: calc(var(--u) * 27); width: calc(var(--u) * 15); height: calc(var(--u) * 15); border-color: rgba(125,255,154,.7); }
+.k-mid { right: calc(var(--u) * 24); bottom: calc(var(--u) * 22); width: calc(var(--u) * 13); height: calc(var(--u) * 13); }
+.cpad .g-btn-icon { margin-top: -12%; width: 52%; height: 52%; }
+.cpad .k-main .g-btn-icon { margin-top: 0; width: 56%; height: 56%; }
+.cpad .g-btn-label { font-size: calc(var(--u) * 2.3); }
+
+/* ---------- 弹出面板：地图、设置 ---------- */
+.cbox { position: relative; width: min(94vw, calc(var(--u) * 170)); max-height: 100%; min-height: 0; padding: calc(var(--u) * 3); display: flex; flex-direction: column; gap: calc(var(--u) * 2); }
+.cset .cbox { width: min(94vw, calc(var(--u) * 130)); }
+.cbox-head { display: flex; align-items: baseline; gap: calc(var(--u) * 3); flex: none; }
+.cbox-head b { font-size: calc(var(--u) * 4.6); } .cbox-head span { color: #9aa7c2; font-size: calc(var(--u) * 2.6); }
+.cmap-body { display: flex; gap: calc(var(--u) * 2.5); flex: 1 1 auto; min-height: 0; }
+.bigmap { flex: none; width: min(60vh, 44vw); height: min(60vh, 44vw); border-radius: calc(var(--u) * 1.6); border: 1px solid var(--line); }
+.mlist { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 1); }
+.mrow { display: flex; gap: calc(var(--u) * 1.8); align-items: flex-start; padding: calc(var(--u) * 1.2) calc(var(--u) * 1.6); border-radius: calc(var(--u) * 1.5); background: rgba(255,255,255,.05); }
+.mrow i { flex: none; width: calc(var(--u) * 5.6); height: calc(var(--u) * 5.6); border-radius: calc(var(--u) * 1); background: #ffd84a; color: #201800; font-style: normal; font-weight: 800; display: grid; place-items: center; font-size: calc(var(--u) * 3); }
+.mrow div { display: flex; flex-direction: column; font-size: calc(var(--u) * 2.5); color: #aab5cf; line-height: 1.4; } .mrow b { color: #e9eefb; font-size: calc(var(--u) * 2.9); }
+.mrow.done { opacity: .55; } .mrow.done i { background: #9a8a3a; }
+.cbox > .g-b { flex: none; align-self: center; min-width: calc(var(--u) * 30); }
+
+/* ---------- 竖屏 ---------- */
+@media (orientation: portrait) {
+  .g-joy-zone { width: 50%; height: 40%; }
+  .radar { width: calc(var(--u) * 27); height: calc(var(--u) * 27); }
+  .obj { top: calc(var(--st) + var(--u) * 33); max-width: 92vw; }
+  .c-banner { top: 30%; }
+  .c-banner b { font-size: calc(var(--u) * 5); }
+  .speed { bottom: calc(var(--sb) + var(--u) * 52); }
+  .cmap-body { flex-direction: column; }
+  .bigmap { width: min(84vw, 46vh); height: min(84vw, 46vh); align-self: center; }
+}
