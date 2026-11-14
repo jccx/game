@@ -1,0 +1,74 @@
+/* 疾风卡丁的界面样式。尺寸单位 --u 定义在 shared/css/base.css。默认横屏，末尾是竖屏的调整。 */
+
+.g-hud > .kstat, .g-hud > .kright, .g-hud > .kbig, .g-hud > .kmsg, .g-hud > .kspeed, .g-hud > .kpad { pointer-events: none; }
+
+/* ---------- 左上：名次、圈数、时间 ---------- */
+.kstat { position: absolute; left: calc(var(--sl) + var(--u) * 3); top: calc(var(--st) + var(--u) * 2); display: flex; flex-direction: column; gap: calc(var(--u) * .4); text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+.kplace b { font-size: calc(var(--u) * 13); font-weight: 900; line-height: 1; color: #ffe066; font-style: italic; }
+.kplace i { font-size: calc(var(--u) * 5); font-style: normal; color: #fff; opacity: .85; }
+.klap { font-size: calc(var(--u) * 3.6); font-weight: 700; } .ktime { font-size: calc(var(--u) * 3.4); font-variant-numeric: tabular-nums; }
+
+/* ---------- 右上：无敌、设置、小地图 ---------- */
+.kright { position: absolute; right: calc(var(--sr) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 1.2); }
+.krow { display: flex; gap: calc(var(--u) * 1.5); align-items: center; } .krow > * { pointer-events: auto; }
+.g-ic svg { width: 62%; height: 62%; }
+.kmini { width: calc(var(--u) * 28); height: calc(var(--u) * 28); border-radius: calc(var(--u) * 2); background: rgba(8,12,22,.35); }
+
+/* ---------- 中间：倒计时和提示 ---------- */
+.kbig { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.6); font-size: calc(var(--u) * 22); font-weight: 900; font-style: italic; color: #fff; text-shadow: 0 4px 0 #c0392b, 0 6px 14px rgba(0,0,0,.6); opacity: 0; white-space: nowrap; }
+.kbig.show { opacity: 1; transform: translate(-50%, -50%) scale(1); transition: transform .25s cubic-bezier(.2,1.6,.4,1), opacity .15s; }
+.kmsg { position: absolute; left: 50%; top: 17%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .2s; padding: calc(var(--u) * 1) calc(var(--u) * 5); border-radius: 999px; background: rgba(8,12,22,.6); white-space: nowrap; }
+.kmsg.show { opacity: 1; }
+.kmsg b { display: block; font-size: calc(var(--u) * 4.4); color: #ffe066; } .kmsg span { font-size: calc(var(--u) * 2.8); color: #d6def2; }
+
+/* ---------- 下方中间：速度和氮气槽 ---------- */
+.kspeed { position: absolute; left: 50%; bottom: calc(var(--sb) + var(--u) * 3); transform: translateX(-50%); text-align: center; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+.kspeed b { font-size: calc(var(--u) * 8); font-weight: 900; font-style: italic; font-variant-numeric: tabular-nums; } .kspeed span { font-size: calc(var(--u) * 2.8); margin-left: .3em; opacity: .85; }
+.kgauge { width: calc(var(--u) * 36); height: calc(var(--u) * 2); margin-top: calc(var(--u) * .6); border-radius: 99px; background: rgba(8,12,22,.6); border: 1px solid rgba(255,255,255,.4); overflow: hidden; }
+.kgauge i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4ab8ff, #9bf0ff); }
+
+/* ---------- 右下：漂移、氮气、道具、刹车 ---------- */
+.kpad { position: absolute; right: calc(var(--sr) + var(--u) * 2); bottom: calc(var(--sb) + var(--u) * 2); width: calc(var(--u) * 50); height: calc(var(--u) * 46); }
+.kpad > * { pointer-events: auto; }
+.k-drift { right: calc(var(--u) * 2); bottom: calc(var(--u) * 2); width: calc(var(--u) * 23); height: calc(var(--u) * 23); border-color: rgba(255,214,150,.8); background: radial-gradient(circle at 35% 28%, rgba(240,150,70,.65), rgba(70,26,12,.86) 70%); }
+.k-nitro { right: calc(var(--u) * 28); bottom: calc(var(--u) * 3); width: calc(var(--u) * 17); height: calc(var(--u) * 17); border-color: rgba(120,210,255,.85); }
+.k-item { right: calc(var(--u) * 5); bottom: calc(var(--u) * 28); width: calc(var(--u) * 16); height: calc(var(--u) * 16); border-color: rgba(255,224,102,.85); }
+.k-brake { right: calc(var(--u) * 25); bottom: calc(var(--u) * 23); width: calc(var(--u) * 12); height: calc(var(--u) * 12); }
+.kpad .g-btn-icon { margin-top: -12%; width: 52%; height: 52%; }
+.kpad .g-btn-label { font-size: calc(var(--u) * 2.4); }
+.kpad .g-btn-badge { font-size: calc(var(--u) * 3.4); right: 12%; top: 8%; color: #9bf0ff; }
+.emoji { font-size: calc(var(--u) * 7); line-height: 1; }
+
+/* ---------- 菜单、设置、结算 ---------- */
+.kmenu { background: radial-gradient(circle at 50% 10%, #3a2030, #0a0e18 75%); }
+.kbox { position: relative; width: min(96vw, calc(var(--u) * 170)); max-height: 100%; min-height: 0; padding: calc(var(--u) * 3) calc(var(--u) * 3.5); display: flex; flex-direction: column; gap: calc(var(--u) * 2); }
+.kset .kbox, .kend .kbox { width: min(94vw, calc(var(--u) * 120)); }
+.khead { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 2); flex: none; }
+.khead h1 { margin: 0; font-size: calc(var(--u) * 6.4); font-style: italic; letter-spacing: .06em; white-space: nowrap; background: linear-gradient(#fff3c0, #f08a2e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.khead h2 { margin: 0; font-size: calc(var(--u) * 6.4); font-style: italic; } .khead h2.win { color: #ffe066; }
+.kacts { display: flex; align-items: center; gap: calc(var(--u) * 1.6); } .kacts a { text-decoration: none; }
+.kacts .start { min-width: calc(var(--u) * 32); min-height: calc(var(--u) * 11); font-size: calc(var(--u) * 4.2); box-shadow: 0 0 calc(var(--u) * 3) rgba(246,208,106,.45); }
+.kbody { flex: 1 1 auto; min-height: 0; padding-right: calc(var(--u) * 1); }
+.kbody h3 { margin: calc(var(--u) * 1) 0 calc(var(--u) * 1.4); font-size: calc(var(--u) * 3); color: #e0b8a0; font-weight: 600; }
+.ktracks { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--u) * 1.6); }
+.ktrack { display: flex; flex-direction: column; align-items: center; gap: .15em; padding: calc(var(--u) * 1.4); border-radius: calc(var(--u) * 2); border: 1px solid var(--line); background: rgba(255,255,255,.05); color: inherit; font: inherit; touch-action: manipulation; min-width: 0; }
+.ktrack canvas { width: 70%; max-width: calc(var(--u) * 30); aspect-ratio: 1; }
+.ktrack b { font-size: calc(var(--u) * 3.6); } .ktrack span { font-size: calc(var(--u) * 2.5); color: #b9c4dc; text-align: center; } .ktrack i { font-style: normal; font-size: calc(var(--u) * 2.2); color: #8f99b0; text-align: center; }
+.ktrack.on { border-color: var(--gold); background: rgba(246,208,106,.12); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.25); }
+.ktip { margin: calc(var(--u) * 2) 0 0; font-size: calc(var(--u) * 2.7); color: #aab5cf; line-height: 1.6; }
+.kend-sub { color: #b9c4dc; font-size: calc(var(--u) * 3); flex: none; }
+.kend-list { display: flex; flex-direction: column; gap: calc(var(--u) * .6); flex: 1 1 auto; min-height: 0; }
+.kend-row { display: grid; grid-template-columns: 2em 1.2em 1fr auto; align-items: center; gap: calc(var(--u) * 1); padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: calc(var(--u) * 1.4); background: rgba(255,255,255,.05); font-size: calc(var(--u) * 3); font-variant-numeric: tabular-nums; }
+.kend-row i, .kend-row em { font-style: normal; } .kend-row.me { outline: 1px solid var(--gold); background: rgba(246,208,106,.12); }
+
+/* ---------- 竖屏 ---------- */
+@media (orientation: portrait) {
+  .g-joy-zone { width: 50%; height: 40%; }
+  .kmini { width: calc(var(--u) * 24); height: calc(var(--u) * 24); }
+  .kbig { font-size: calc(var(--u) * 17); }
+  .kspeed { bottom: calc(var(--sb) + var(--u) * 52); }
+  .ktracks { grid-template-columns: 1fr; }
+  .ktrack { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; text-align: left; column-gap: calc(var(--u) * 2); }
+  .ktrack canvas { width: calc(var(--u) * 18); }
+  .khead h1 { font-size: calc(var(--u) * 5.4); } .kacts .start { min-width: calc(var(--u) * 26); }
+}
