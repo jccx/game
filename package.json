@@ -1,0 +1,14 @@
+{
+  "name": "game",
+  "private": true,
+  "description": "jccx/game：网页小游戏合集（裂谷争锋、落日湾）。本文件只用于安装测试工具，游戏本身不需要构建。",
+  "type": "module",
+  "scripts": {
+    "serve": "node test/serve.mjs",
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.0.0",
+    "three": "^0.180.0"
+  }
+}

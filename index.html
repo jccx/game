@@ -2,9 +2,167 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>游戏正在搭建中</title>
-<style>html,body{height:100%;margin:0;background:#0b1220;color:#cfe3ff;font:16px/1.6 system-ui,sans-serif;display:grid;place-items:center}</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>游戏大厅</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231b2a55'/%3E%3Cpath d='M9 20l4-9 3 6 3-6 4 9z' fill='%23f6d06a'/%3E%3C/svg%3E">
+<style>
+/* 首页：选择游戏。手机优先，竖屏一列，横屏/电脑自动变成多列。 */
+:root { --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: radial-gradient(1200px 700px at 15% -10%, #24376e 0%, transparent 60%),
+              radial-gradient(900px 600px at 110% 20%, #4a2360 0%, transparent 55%), #0a0e1a;
+  background-attachment: fixed;
+  color: #e9eefb;
+  font-family: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  padding: calc(var(--st) + 20px) calc(var(--sr) + 16px) calc(var(--sb) + 28px) calc(var(--sl) + 16px);
+}
+header { max-width: 1100px; margin: 0 auto 18px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
+header p { margin: 0; color: #9fb0d6; font-size: 14px; }
+main { max-width: 1100px; margin: 0 auto; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.card {
+  position: relative; display: block; text-decoration: none; color: inherit;
+  border-radius: 16px; overflow: hidden; background: #131b33;
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  transition: transform .12s, box-shadow .12s;
+}
+.card:active { transform: scale(.985); }
+@media (hover: hover) { .card.ready:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(0,0,0,.5); } }
+.art { display: block; width: 100%; aspect-ratio: 16 / 9; }
+.info { padding: 12px 14px 14px; }
+.info h2 { margin: 0 0 4px; font-size: 19px; display: flex; align-items: center; gap: 8px; }
+.info p { margin: 0 0 10px; font-size: 13.5px; color: #a9b8dc; line-height: 1.5; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags span { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: #cdd9f7; }
+.badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.ready .badge { background: #1f8f5a; color: #eafff3; }
+.wip .badge { background: #5b647d; color: #e2e7f5; }
+.wip { opacity: .72; }
+.wip .art { filter: grayscale(.6) brightness(.8); }
+footer { max-width: 1100px; margin: 22px auto 0; font-size: 12.5px; color: #8493b8; line-height: 1.7; }
+footer a { color: #a9c4ff; }
+</style>
 </head>
-<body><p>游戏正在搭建中，稍后刷新。</p></body>
+<body>
+<header>
+  <h1>游戏大厅</h1>
+  <p>点一个开始玩。手机横屏、竖屏都可以，添加到主屏幕后可全屏。</p>
+</header>
+
+<main>
+  <!-- 状态由 class 决定：ready = 可玩，wip = 制作中（制作中的卡片不可点）。游戏上线时把 wip 改成 ready 并补上 href。 -->
+
+  <a class="card wip" data-game="moba">
+    <svg class="art" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="a1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17306b"/><stop offset=".5" stop-color="#1c5a52"/><stop offset="1" stop-color="#6b1f2d"/></linearGradient>
+        <radialGradient id="a2"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="320" height="180" fill="url(#a1)"/>
+      <path d="M-10 190 L330 -10" stroke="#d9c38a" stroke-width="16" opacity=".55"/>
+      <path d="M-10 60 Q150 40 330 120" stroke="#3fa9d8" stroke-width="12" opacity=".45" fill="none"/>
+      <g transform="translate(70 118)"><circle r="34" fill="url(#a2)" opacity=".35"/><path d="M0 -40 L14 -6 L8 26 L-8 26 L-14 -6Z" fill="#69b7ff"/><path d="M0 -40 L14 -6 L0 2Z" fill="#bfe0ff"/><rect x="-16" y="24" width="32" height="8" rx="2" fill="#2b4c8f"/></g>
+      <g transform="translate(250 60)"><circle r="34" fill="url(#a2)" opacity=".3"/><path d="M0 -40 L14 -6 L8 26 L-8 26 L-14 -6Z" fill="#ff6b6b"/><path d="M0 -40 L14 -6 L0 2Z" fill="#ffc0c0"/><rect x="-16" y="24" width="32" height="8" rx="2" fill="#8f2b2b"/></g>
+      <g transform="translate(160 90)" stroke-linecap="round"><path d="M-22 22 L22 -22" stroke="#f3f6ff" stroke-width="7"/><path d="M22 22 L-22 -22" stroke="#f3f6ff" stroke-width="7"/><path d="M-27 13 L-13 27M27 13 L13 27" stroke="#f6d06a" stroke-width="6"/></g>
+    </svg>
+    <div class="info">
+      <h2>裂谷争锋 <span class="badge">制作中</span></h2>
+      <p>3D 英雄对战。5 个英雄选 1 个，其余由电脑控制，推塔、打野、拆水晶。</p>
+      <div class="tags"><span>5v5 三路</span><span>3v3</span><span>1v1</span></div>
+    </div>
+  </a>
+
+  <a class="card wip" data-game="city">
+    <svg class="art" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs><linearGradient id="b1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b1d5c"/><stop offset=".55" stop-color="#e2664a"/><stop offset="1" stop-color="#f7c66b"/></linearGradient></defs>
+      <rect width="320" height="180" fill="url(#b1)"/>
+      <circle cx="232" cy="104" r="34" fill="#ffe9a8" opacity=".9"/>
+      <g fill="#1a1736"><rect x="10" y="70" width="34" height="80"/><rect x="50" y="48" width="26" height="102"/><rect x="82" y="84" width="40" height="66"/><rect x="128" y="38" width="30" height="112"/><rect x="164" y="76" width="36" height="74"/><rect x="206" y="96" width="30" height="54"/><rect x="242" y="62" width="28" height="88"/><rect x="276" y="88" width="40" height="62"/></g>
+      <g fill="#ffd97a" opacity=".85"><rect x="56" y="58" width="5" height="6"/><rect x="66" y="74" width="5" height="6"/><rect x="134" y="50" width="5" height="6"/><rect x="146" y="70" width="5" height="6"/><rect x="18" y="84" width="5" height="6"/><rect x="250" y="74" width="5" height="6"/><rect x="172" y="90" width="5" height="6"/><rect x="290" y="100" width="5" height="6"/></g>
+      <rect y="150" width="320" height="30" fill="#23233a"/>
+      <path d="M0 165 H320" stroke="#f1d27a" stroke-width="2" stroke-dasharray="14 12"/>
+      <g transform="translate(92 152)"><path d="M0 8 L6 -4 L34 -4 L44 8 L52 9 L52 16 L-4 16 L-4 9Z" fill="#e23b3b"/><path d="M9 -2 L31 -2 L38 7 L4 7Z" fill="#9fd8ff"/><circle cx="8" cy="17" r="5" fill="#111"/><circle cx="40" cy="17" r="5" fill="#111"/></g>
+      <g transform="translate(60 34) rotate(-8)" fill="#f4f6ff"><path d="M0 0 L46 -3 L54 0 L46 3Z"/><path d="M16 0 L30 -14 L34 -14 L28 0Z"/><path d="M4 0 L10 -8 L13 -8 L11 0Z"/></g>
+    </svg>
+    <div class="info">
+      <h2>落日湾 <span class="badge">制作中</span></h2>
+      <p>3D 开放世界都市。步行、开车、骑摩托、开飞机、坦克和船，接任务，躲通缉。</p>
+      <div class="tags"><span>自由漫游</span><span>多种载具</span><span>任务</span></div>
+    </div>
+  </a>
+
+  <a class="card wip" data-game="kart">
+    <svg class="art" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs><linearGradient id="c1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3fb6ff"/><stop offset=".6" stop-color="#a5e5ff"/><stop offset=".61" stop-color="#58c26b"/><stop offset="1" stop-color="#2f8f4b"/></linearGradient></defs>
+      <rect width="320" height="180" fill="url(#c1)"/>
+      <path d="M-20 190 Q120 60 340 120 L340 190Z" fill="#4a4f63"/>
+      <path d="M-20 178 Q120 62 340 108" stroke="#fff" stroke-width="5" stroke-dasharray="16 12" fill="none"/>
+      <path d="M40 190 Q150 100 340 150" stroke="#f6d06a" stroke-width="3" stroke-dasharray="10 14" fill="none"/>
+      <g transform="translate(150 118) rotate(-10)"><rect x="-28" y="-8" width="60" height="18" rx="7" fill="#ff5a5a"/><path d="M20 -8 L38 -2 L38 8 L20 10Z" fill="#ffd166"/><circle cx="-18" cy="12" r="10" fill="#1b1b28"/><circle cx="22" cy="12" r="10" fill="#1b1b28"/><circle cx="-18" cy="12" r="4" fill="#cfd6ea"/><circle cx="22" cy="12" r="4" fill="#cfd6ea"/><circle cx="0" cy="-16" r="10" fill="#ffe0b8"/><path d="M-10 -20 A10 10 0 0 1 10 -20Z" fill="#3b6fd6"/></g>
+      <g stroke="#fff" stroke-width="3" opacity=".8" stroke-linecap="round"><path d="M86 112 H112"/><path d="M78 124 H108"/><path d="M92 136 H114"/></g>
+      <g transform="translate(262 46)"><rect x="0" y="0" width="4" height="46" fill="#333"/><g><rect x="4" y="0" width="12" height="9" fill="#111"/><rect x="16" y="0" width="12" height="9" fill="#fff"/><rect x="28" y="0" width="12" height="9" fill="#111"/><rect x="4" y="9" width="12" height="9" fill="#fff"/><rect x="16" y="9" width="12" height="9" fill="#111"/><rect x="28" y="9" width="12" height="9" fill="#fff"/></g></g>
+    </svg>
+    <div class="info">
+      <h2>疾风卡丁 <span class="badge">制作中</span></h2>
+      <p>3D 卡丁车竞速。漂移攒气、氮气加速、道具互扔，和电脑车手比赛。</p>
+      <div class="tags"><span>漂移</span><span>道具赛</span><span>多条赛道</span></div>
+    </div>
+  </a>
+
+  <a class="card wip" data-game="artillery">
+    <svg class="art" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs><linearGradient id="d1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2f6b"/><stop offset="1" stop-color="#7fb7e8"/></linearGradient></defs>
+      <rect width="320" height="180" fill="url(#d1)"/>
+      <path d="M0 140 Q40 96 84 120 T160 104 Q176 92 190 118 T260 96 Q296 86 320 118 V180 H0Z" fill="#5d8a3a"/>
+      <path d="M0 150 Q40 110 84 132 T160 118 Q176 108 190 130 T260 110 Q296 100 320 130 V180 H0Z" fill="#7a5a3a"/>
+      <circle cx="176" cy="116" r="15" fill="#7fb7e8" opacity=".55"/>
+      <rect y="166" width="320" height="14" fill="#2f6fd0" opacity=".85"/>
+      <g transform="translate(58 104)"><ellipse cx="0" cy="0" rx="12" ry="14" fill="#ffd166"/><circle cx="-4" cy="-4" r="2.4" fill="#222"/><circle cx="5" cy="-4" r="2.4" fill="#222"/><rect x="6" y="-2" width="24" height="6" rx="3" fill="#444" transform="rotate(-32)"/><path d="M-12 -8 A12 12 0 0 1 12 -8Z" fill="#3b6fd6"/></g>
+      <g transform="translate(262 84)"><ellipse cx="0" cy="0" rx="12" ry="14" fill="#ff8f6b"/><circle cx="-5" cy="-4" r="2.4" fill="#222"/><circle cx="4" cy="-4" r="2.4" fill="#222"/><path d="M-12 -8 A12 12 0 0 1 12 -8Z" fill="#c0392b"/></g>
+      <path d="M84 86 Q160 -10 236 62" stroke="#fff" stroke-width="2.5" stroke-dasharray="3 7" fill="none" opacity=".9"/>
+      <g transform="translate(200 34)"><circle r="8" fill="#222"/><path d="M4 -7 L10 -14" stroke="#c9a15a" stroke-width="2.5"/><circle cx="11" cy="-15" r="3" fill="#ffb347"/></g>
+    </svg>
+    <div class="info">
+      <h2>豆兵大战 <span class="badge">制作中</span></h2>
+      <p>回合制炮战。算好角度和力度，看风向，把对面的小兵轰下地图。</p>
+      <div class="tags"><span>可破坏地形</span><span>多种武器</span><span>对战电脑</span></div>
+    </div>
+  </a>
+
+  <a class="card wip" data-game="park">
+    <svg class="art" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs><linearGradient id="e1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#69c7ff"/><stop offset=".62" stop-color="#d6f3ff"/><stop offset=".63" stop-color="#7ed08a"/><stop offset="1" stop-color="#4fae66"/></linearGradient></defs>
+      <rect width="320" height="180" fill="url(#e1)"/>
+      <path d="M10 140 Q40 30 90 110 T170 60 Q210 10 240 120 L300 140" stroke="#e24b4b" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <g stroke="#8a5a3a" stroke-width="3"><path d="M30 96 V150M56 62 V150M90 110 V150M130 86 V150M170 60 V150M206 38 V150M240 120 V150"/></g>
+      <g transform="translate(150 70) rotate(-28)"><rect x="-16" y="-8" width="32" height="12" rx="4" fill="#ffd166"/><circle cx="-8" cy="-10" r="4" fill="#ffe0b8"/><circle cx="6" cy="-10" r="4" fill="#ffe0b8"/></g>
+      <g transform="translate(272 96)"><circle r="30" fill="none" stroke="#fff" stroke-width="3"/><g stroke="#fff" stroke-width="1.6"><path d="M-30 0 H30M0 -30 V30M-21 -21 L21 21M21 -21 L-21 21"/></g><g fill="#ff7ab8"><circle cx="0" cy="-30" r="5"/><circle cx="30" cy="0" r="5"/><circle cx="0" cy="30" r="5"/><circle cx="-30" cy="0" r="5"/></g><path d="M-10 54 L0 0 L10 54" stroke="#5b6b8f" stroke-width="4" fill="none"/></g>
+      <path d="M0 158 H320" stroke="#e9d7ad" stroke-width="12"/>
+      <g fill="#fff"><circle cx="40" cy="154" r="3"/><circle cx="96" cy="156" r="3"/><circle cx="148" cy="154" r="3"/><circle cx="196" cy="156" r="3"/></g>
+    </svg>
+    <div class="info">
+      <h2>梦想乐园 <span class="badge">制作中</span></h2>
+      <p>游乐园经营。铺路、建设施和商店、搭过山车，让游客玩得开心还愿意掏钱。</p>
+      <div class="tags"><span>建造</span><span>过山车</span><span>经营</span></div>
+    </div>
+  </a>
+</main>
+
+<footer>
+  全部游戏在浏览器里直接运行，不联网、不收集任何数据。源代码：
+  <a href="https://github.com/jccx/game">github.com/jccx/game</a>
+</footer>
+
+<script>
+// 制作中的卡片不可点击
+document.querySelectorAll('.card.wip').forEach((c) => c.addEventListener('click', (e) => e.preventDefault()));
+</script>
+</body>
 </html>
