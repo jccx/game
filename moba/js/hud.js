@@ -1,6 +1,7 @@
 // 裂谷争锋：对局界面（HUD）和玩家输入。
 // 左下摇杆移动；右下普攻和三个技能（按住拖动瞄准，松手释放，拖到“取消”处松手则取消）；
-// 另有回城、恢复、闪现、补兵、推塔、快捷购买、商店、小地图、战况、设置。
+// 另有回城、恢复、闪现、补兵、推塔、快捷购买（小地图下方）、小地图、战况；
+// 屏幕顶部偏右一排：无敌（作弊开关）、商店、金币、战绩、设置。
 // 电脑上：WASD 移动，J/空格/鼠标左键普攻，Q/E/R 技能（朝鼠标位置），1/2/3 加点，B 回城，F 闪现，G 恢复，P 商店，Esc 设置。
 import { el, toast, toggleFullscreen } from '../../shared/js/ui.js';
 import { Joystick, ActionButton } from '../../shared/js/input.js';
@@ -9,7 +10,7 @@ import { fmtTime } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { KIND } from './entities.js';
 import { ITEMS, ITEM_TYPES, MAX_ITEMS } from './items.js';
-import { HERO, ECON, CHEAT } from './config.js';
+import { HERO, ECON } from './config.js';
 import { paintGround, TEAM_CSS } from './render/scene.js';
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}${extra}</svg>`;
@@ -73,11 +74,7 @@ export class Hud {
     this.mini.style.aspectRatio = `${mw} / ${mh}`;
     this.miniBg = paintGround(g.map, 220, true);
     this.mctx = this.mini.getContext('2d');
-    const shopRow = el('div', { cls: 'shop-row' }, left);
-    this.quick = el('div', { cls: 'quick g-pe', on: { pointerdown: (e) => { e.preventDefault(); const id = P.nextBuild(); if (id) this.tryBuy(id); } } }, shopRow);
-    this.shopBtn = el('div', { cls: 'g-ic', html: ICONS.shop, on: { pointerdown: (e) => { e.preventDefault(); this.openShop(); } } }, shopRow);
-    // 作弊按钮：按一下无敌 15 秒
-    this.cheatEl = el('div', { cls: 'cheat', text: `作弊：无敌 ${CHEAT.godTime} 秒`, on: { pointerdown: (e) => { e.preventDefault(); e.stopPropagation(); this.pend.god = true; } } }, left);
+    this.quick = el('div', { cls: 'quick g-pe', on: { pointerdown: (e) => { e.preventDefault(); const id = P.nextBuild(); if (id) this.tryBuy(id); } } }, left);
 
     // 上方：比分、时间
     const top = el('div', { cls: 'hud-top' }, r);
@@ -85,11 +82,14 @@ export class Hud {
     this.timeEl = el('span', { cls: 'tm', text: '00:00' }, top);
     this.scoreR = el('b', { cls: 'sr', text: '0' }, top);
 
-    // 右上：金币、战绩、设置
+    // 右上：从左到右依次是 无敌（作弊）、商店、金币，然后是战绩和设置
     const right = el('div', { cls: 'hud-right' }, r);
-    this.goldEl = el('div', { cls: 'gold', text: '300' }, right);
-    this.kdaEl = el('div', { cls: 'kda', text: '0/0/0' }, right);
-    el('div', { cls: 'g-ic', html: ICONS.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, right);
+    const main = el('div', { cls: 'hr-row' }, right), sub = el('div', { cls: 'hr-row' }, right);
+    this.cheatEl = el('div', { cls: 'cheat', text: '无敌 关', on: { pointerdown: (e) => { e.preventDefault(); e.stopPropagation(); this.pend.god = true; } } }, main);
+    this.shopBtn = el('div', { cls: 'g-ic shop-btn', html: ICONS.shop, on: { pointerdown: (e) => { e.preventDefault(); this.openShop(); } } }, main);
+    this.goldEl = el('div', { cls: 'gold', text: '300' }, main);
+    this.kdaEl = el('div', { cls: 'kda', text: '0/0/0' }, sub);
+    el('div', { cls: 'g-ic', html: ICONS.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, sub);
 
     // 击杀信息、横幅、取消施法、回城进度、阵亡遮罩
     this.feedEl = el('div', { cls: 'feed' }, r);
@@ -240,8 +240,10 @@ export class Hud {
     if (pd.flash) { inn.flash = true; pd.flash = false; }
     if (pd.god) {
       pd.god = false;
-      if (P.alive) { P.godT = CHEAT.godTime; P.stunT = 0; P.slowT = 0; this.game.emit({ type: 'god', u: P }); }
-      else toast('复活后再用');
+      // 无敌是一个开关：点一下开，再点一下关
+      if (!P.alive) toast('复活后再用');
+      else if (P.godT > 0) { P.godT = 0; this.game.emit({ type: 'god', u: P, on: false }); }
+      else { P.godT = Infinity; P.stunT = 0; P.slowT = 0; this.game.emit({ type: 'god', u: P, on: true }); }
     }
   }
 
@@ -353,10 +355,10 @@ export class Hud {
       this.quick.className = 'quick g-pe' + (ok ? ' ok' : '');
       this.quick.innerHTML = `<b>${it.name}</b><span>${it.cost}</span>`;
     });
-    // 作弊按钮：无敌期间显示倒计时
-    set('god', P.godT > 0 ? Math.ceil(P.godT) : 0, (v) => {
-      this.cheatEl.textContent = v ? `无敌中 ${v} 秒` : `作弊：无敌 ${CHEAT.godTime} 秒`;
-      this.cheatEl.classList.toggle('on', v > 0);
+    // 作弊按钮：显示无敌开关的状态
+    set('god', P.godT > 0, (v) => {
+      this.cheatEl.textContent = v ? '无敌 开' : '无敌 关';
+      this.cheatEl.classList.toggle('on', v);
     });
     // 阵亡遮罩
     set('dead', !P.alive, (v) => { this.deadEl.classList.toggle('show', v && !g.over); });

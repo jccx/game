@@ -29,7 +29,7 @@ export class Unit {
     this.atkSeq = 0;               // 每出手一次加一，渲染层据此播放攻击动作
     this.stunT = 0; this.slowT = 0; this.slowK = 1;
     this.shield = 0; this.shieldT = 0; this.invulnT = 0;
-    this.godT = 0;                 // 作弊无敌的剩余时间：不受伤害、不吃控制，但敌人仍然会来打
+    this.godT = 0;                 // 作弊无敌：大于 0 时不受伤害、不吃控制（敌人仍然会来打）。开关打开时设为 Infinity，关闭时设回 0
     this.moving = false;
     this.lastDamagedT = -99;
     this.dmgTakenMul = 1;

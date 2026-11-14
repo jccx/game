@@ -220,7 +220,10 @@ export class View {
         break;
       }
       case 'buy': if (ev.u === P) Sfx.play('coin'); break;
-      case 'god': fx.ring(ev.u.x, ev.u.z, 4, 0xffd35a, 0.6); fx.levelUp(ev.u); fx.text(ev.u.x, 4.4, ev.u.z, '无敌！', 'gold'); Sfx.play('levelup'); break;
+      case 'god':
+        if (ev.on) { fx.ring(ev.u.x, ev.u.z, 4, 0xffd35a, 0.6); fx.levelUp(ev.u); fx.text(ev.u.x, 4.4, ev.u.z, '无敌 开', 'gold'); Sfx.play('levelup'); }
+        else { fx.text(ev.u.x, 4.4, ev.u.z, '无敌 关', 'true'); Sfx.play('click'); }
+        break;
     }
     this.onEvent(ev);
   }
@@ -258,10 +261,8 @@ export class View {
     const god = P.alive && P.godT > 0;
     this.godBubble.visible = god;
     if (god) {
-      // 快结束的最后 3 秒闪烁提醒
       this.godBubble.position.set(px, 1.8, pz);
       this.godBubble.scale.setScalar(2.3 + Math.sin(this.time * 6) * 0.08);
-      this.godBubble.material.opacity = P.godT < 3 ? 0.12 + 0.2 * Math.abs(Math.sin(this.time * 10)) : 0.3;
     }
 
     // ---- 小兵、野怪、建筑：顺便填写阴影和血条的实例数据 ----

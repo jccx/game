@@ -41,10 +41,8 @@
 .hud-left { position: absolute; left: calc(var(--sl) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); width: calc(var(--u) * 30); display: flex; flex-direction: column; gap: calc(var(--u) * 1.2); }
 .g-hud > .hud-left { pointer-events: none; }
 .mini { width: 100%; display: block; border-radius: calc(var(--u) * 1.4); border: 1px solid rgba(255,255,255,.35); box-shadow: 0 2px 10px rgba(0,0,0,.5); opacity: .92; }
-.shop-row { display: flex; gap: calc(var(--u) * 1.2); align-items: center; }
-.shop-row > * { pointer-events: auto; }
 .quick {
-  flex: 1; min-width: 0; height: calc(var(--u) * 8.5); padding: 0 calc(var(--u) * 1.8); border-radius: calc(var(--u) * 2);
+  pointer-events: auto; min-width: 0; height: calc(var(--u) * 8.5); padding: 0 calc(var(--u) * 1.8); border-radius: calc(var(--u) * 2);
   display: flex; flex-direction: column; justify-content: center; background: rgba(10,16,30,.66); border: 1px solid var(--line);
   font-size: calc(var(--u) * 2.5); line-height: 1.25; color: #9aa7c2; touch-action: manipulation;
 }
@@ -55,13 +53,13 @@
 .g-ic svg { width: 62%; height: 62%; }
 
 .cheat {
-  pointer-events: auto; height: calc(var(--u) * 8); padding: 0 calc(var(--u) * 2); border-radius: calc(var(--u) * 2);
-  display: flex; align-items: center; justify-content: center; gap: .4em; white-space: nowrap;
-  background: rgba(40,16,60,.72); border: 1px solid rgba(200,150,255,.55); color: #e6ccff;
-  font-size: calc(var(--u) * 2.8); font-weight: 600; touch-action: manipulation;
+  pointer-events: auto; height: calc(var(--u) * 8.5); min-width: calc(var(--u) * 13); padding: 0 calc(var(--u) * 2.4); border-radius: calc(var(--u) * 2);
+  display: flex; align-items: center; justify-content: center; white-space: nowrap;
+  background: rgba(46,18,70,.78); border: 1px solid rgba(200,150,255,.6); color: #ecd9ff;
+  font-size: calc(var(--u) * 3.1); font-weight: 700; touch-action: manipulation; font-variant-numeric: tabular-nums;
 }
 .cheat:active { filter: brightness(1.4); }
-.cheat.on { background: rgba(90,66,8,.85); border-color: var(--gold); color: var(--gold); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.7); }
+.cheat.on { background: rgba(90,66,8,.88); border-color: var(--gold); color: var(--gold); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.7); }
 
 /* ---------- 上方：比分；右上：金币、战绩、设置 ---------- */
 .hud-top {
@@ -75,7 +73,8 @@
 .hud-top .tm { color: #d6def2; font-variant-numeric: tabular-nums; }
 .hud-right { position: absolute; right: calc(var(--sr) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); display: flex; align-items: center; gap: calc(var(--u) * 1.5); }
 .g-hud > .hud-right { pointer-events: none; }
-.hud-right > * { pointer-events: auto; }
+.hr-row { display: flex; align-items: center; gap: calc(var(--u) * 1.5); }
+.hr-row > * { pointer-events: auto; }
 .hud-right .gold, .kda { padding: calc(var(--u) * 1.2) calc(var(--u) * 2.4); border-radius: 999px; background: rgba(8,12,22,.6); border: 1px solid var(--line); font-size: calc(var(--u) * 3.2); font-variant-numeric: tabular-nums; }
 .hud-right .gold { color: var(--gold); font-weight: 700; }
 .hud-right .gold::before { content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .35em; vertical-align: -.12em; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3c0, #f0b93a 60%, #a8741a); }
@@ -211,8 +210,12 @@
 @media (orientation: portrait) {
   .g-joy-zone { width: 50%; height: 40%; }
   .hud-left { width: calc(var(--u) * 27); }
-  .hud-top { top: calc(var(--st) + var(--u) * 2); gap: calc(var(--u) * 2); padding: calc(var(--u) * .8) calc(var(--u) * 2.5); }
+  /* 竖屏：比分挪到小地图右边，右上角分两行（第一行 无敌、商店、金币；第二行 战绩、设置） */
+  .hud-top { left: calc(var(--sl) + var(--u) * 30.5); transform: none; top: calc(var(--st) + var(--u) * 2); gap: calc(var(--u) * 1.5); padding: calc(var(--u) * .8) calc(var(--u) * 2); font-size: calc(var(--u) * 3); }
+  .hud-top .sb, .hud-top .sr { font-size: calc(var(--u) * 3.8); }
   .hud-right { flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 1.2); }
+  .hr-row { gap: calc(var(--u) * 1.2); }
+  .cheat { min-width: calc(var(--u) * 11); padding: 0 calc(var(--u) * 1.8); }
   .feed { top: calc(var(--st) + var(--u) * 32); }
   .banner { top: 24%; font-size: calc(var(--u) * 4.6); padding: calc(var(--u) * 1.6) calc(var(--u) * 8); }
   .cancel { top: auto; bottom: calc(var(--sb) + var(--u) * 72); }

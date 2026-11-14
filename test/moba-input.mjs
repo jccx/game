@@ -73,29 +73,44 @@ for (const vname of ['landscape', 'portrait']) {
   check(h.items === 1 && h.gold < 5000, `${vname} 快捷购买买到了装备`, log);
 
   // 商店面板
-  const sb = await center('.shop-row .g-ic');
+  const sb = await center('.shop-btn');
   await page.touchscreen.tap(sb.x, sb.y);
   await sleep(300);
   check(!!(await page.$('.shop .item')), `${vname} 商店面板能打开`, log);
   await shot(page, `moba-input-${vname}-shop`);
   await page.evaluate(() => window.__moba.hud.closeOverlay());
 
-  // 作弊按钮：点一下无敌 15 秒，期间不掉血，15 秒后恢复正常
+  // 作弊按钮是开关：点一下无敌（不掉血、不被眩晕，过多久都有效），再点一下关闭
   const ch = await center('.cheat');
   await page.touchscreen.tap(ch.x, ch.y);
   await sleep(500);
   const god = await page.evaluate(() => {
     const m = window.__moba, g = m.game, p = g.player, foe = g.heroes.find((h) => h.team === 1);
-    const t = p.godT, hp0 = p.hp;
+    const on = p.godT > 0, hp0 = p.hp;
     g.damage(foe, p, 800, 'true'); const hp1 = p.hp;
     p.stun(2); const stunned = p.stunT > 0;
-    m.loop.fastForward(15.5);
-    const tAfter = p.godT, hp2 = p.hp;
-    g.damage(foe, p, 300, 'true');
-    return { t, kept: hp1 === hp0, stunned, tAfter, hurtAfter: p.hp < hp2, label: document.querySelector('.cheat').textContent };
+    m.loop.fastForward(40);
+    g.damage(foe, p, 800, 'true');
+    return { on, kept: hp1 === hp0, stunned, still: p.godT > 0 && p.hp >= hp0, label: document.querySelector('.cheat').textContent };
   });
-  check(god.t > 13 && god.kept && !god.stunned, `${vname} 点作弊按钮后无敌（剩 ${god.t.toFixed(1)} 秒，挨打不掉血、不被眩晕）`, log);
-  check(god.tAfter <= 0 && god.hurtAfter, `${vname} 15 秒后无敌结束，恢复会受伤`, log);
+  check(god.on && god.kept && !god.stunned && god.label === '无敌 开', `${vname} 点无敌按钮后打开（挨打不掉血、不被眩晕，按钮显示“${god.label}”）`, log);
+  check(god.still, `${vname} 过了 40 秒无敌仍然有效（不再倒计时）`, log);
+  await page.touchscreen.tap(ch.x, ch.y);
+  await sleep(500);
+  const off = await page.evaluate(() => {
+    const g = window.__moba.game, p = g.player, foe = g.heroes.find((h) => h.team === 1), hp0 = p.hp;
+    g.damage(foe, p, 300, 'true');
+    return { off: !(p.godT > 0), hurt: p.hp < hp0, label: document.querySelector('.cheat').textContent };
+  });
+  check(off.off && off.hurt && off.label === '无敌 关', `${vname} 再点一下关闭无敌，恢复会受伤（按钮显示“${off.label}”）`, log);
+
+  // 布局：无敌和商店按钮在屏幕顶部偏右、金币的左侧
+  const lay = await page.evaluate(() => {
+    const r = (s) => document.querySelector(s).getBoundingClientRect();
+    const c = r('.cheat'), sh = r('.shop-btn'), g = r('.hud-right .gold');
+    return { cTop: c.top, sTop: sh.top, order: c.right <= sh.left + 1 && sh.right <= g.left + 1, rightHalf: c.left > window.innerWidth * 0.45, h: window.innerHeight };
+  });
+  check(lay.cTop < lay.h * 0.12 && lay.sTop < lay.h * 0.12 && lay.order && lay.rightHalf, `${vname} 无敌、商店、金币从左到右排在屏幕顶部偏右`, log);
 
   // 回城
   await page.evaluate(() => { const g = window.__moba.game; for (const u of g.units) if (u.kind === 2) u.alive = false; });
