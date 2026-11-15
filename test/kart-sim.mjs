@@ -55,12 +55,25 @@ for (const def of TRACKS) {
   const wasDrifting = p.drifting, g = p.gauge, yawTurned = Math.abs(p.yaw - p.vdir);
   p.in.drift = false; p.in.steer = 0; r.events.length = 0; r.update(dt);
   chk(wasDrifting && g > 0.12 && p.boostT >= 0.5 && yawTurned > 0.15, `漂移 1 秒：车身侧滑 ${(yawTurned * 57.3).toFixed(0)} 度，氮气槽 ${(g * 100).toFixed(0)}%，松开后获得 ${p.boostT.toFixed(2)} 秒加速`);
-  // 氮气：让电脑代开（它会在直道上用氮气），给两瓶，看最高速度能不能明显超过平时
+  // 氮气：新开一局，把玩家车放到一段直道上（曲率 < 0.005 连续 30 个取样点，约 60 米），
+  // 时速 30 起步，给两瓶并按住氮气键跑 4 秒，看最高速度能不能明显超过平时。
+  // 旧写法是等电脑 AI 在 25 秒里恰好遇到直道才用氮气，时灵时不灵（还跑坏过后面的香蕉皮测试，
+  // 因为它在原对局里多跑了 6 秒）；现在氮气测试用独立对局，不动原对局的状态
   {
-    const r2 = new Race({ track: TRACKS[0], difficulty: 1, allBots: true }), q = r2.player;
-    for (let i = 0; i < 9 * TICK; i++) r2.update(dt);
-    q.nitro = 2; q.ai.nitroT = 99; let vmax = 0, used = 0;
-    for (let i = 0; i < 25 * TICK; i++) { r2.update(dt); if (q.v > vmax) vmax = q.v; used += r2.events.filter((e) => e.type === 'boost' && e.k === q && e.nitro).length; r2.events.length = 0; }
+    const T = buildTrack(TRACKS[0]);
+    let start = -1;
+    for (let i = 0; i < T.n && start < 0; i++) {
+      let ok = true;
+      for (let j = 0; j < 30; j++) if (Math.abs(T.s[(i + j) % T.n].k) > 0.005) { ok = false; break; }
+      if (ok) start = i;
+    }
+    chk(start >= 0, '森林环道上找到一段直道（连续 30 个取样点曲率 < 0.005）');
+    const r2 = new Race({ track: TRACKS[0], difficulty: 1 }), q = r2.player;
+    for (let i = 0; i < 4 * TICK; i++) r2.update(dt);           // 倒计时走完
+    const s = T.s[start];
+    q.si = start; q.x = s.x; q.z = s.z; q.yaw = Math.atan2(s.tx, s.tz); q.vdir = q.yaw; q.v = 30; q.off = 0;
+    q.nitro = 2; q.in.gas = true; q.in.boost = true; let vmax = 0, used = 0;
+    for (let i = 0; i < 4 * TICK; i++) { r2.update(dt); if (q.v > vmax) vmax = q.v; used += r2.events.filter((e) => e.type === 'boost' && e.k === q && e.nitro).length; r2.events.length = 0; }
     chk(used >= 1 && vmax > KART.max * 1.2, `用氮气 ${used} 次，最高速度冲到 ${vmax.toFixed(1)}（平时最高 ${KART.max}）`);
   }
   // 香蕉皮

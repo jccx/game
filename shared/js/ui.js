@@ -37,6 +37,38 @@ export const store = {
 /** 是否触屏设备 */
 export const isTouch = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
+/**
+ * 只在值变化时才改 DOM 的记忆函数。各游戏 hud.js 的 refresh()/slow() 原来各写了一份
+ * `const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } }`，
+ * 现在统一调这里。用法：`const set = makeMemo(this.c); set('gold', v, (x) => { el.textContent = x; });`
+ */
+export function makeMemo(cache) {
+  return (key, val, fn) => { if (cache[key] !== val) { cache[key] = val; fn(val); } };
+}
+
+/**
+ * 无敌开关按钮（各游戏共用 `.cheat` 样式）。五款游戏原来各写了一份创建代码和刷新代码。
+ * @param {HTMLElement} parent 放按钮的父元素
+ * @param {object} o
+ * @param {string} [o.label='无敌'] 按钮文字前缀（梦想乐园是“免费建造”）
+ * @param {()=>boolean} o.get 当前是否打开
+ * @param {()=>void} o.onToggle 点一下时做的事（改状态、放音效、提示条，各游戏自己写）
+ * @returns {{el: HTMLElement, sync: (v?: boolean)=>void}} sync 按状态刷新文字和 .on 样式，
+ *   各游戏在 refresh()/slow() 里调它；不传参数时按 get() 的当前值刷新
+ */
+export function makeCheatButton(parent, o) {
+  const label = o.label || '无敌';
+  const btn = el('div', {
+    cls: 'cheat', text: label + ' 关',
+    on: { pointerdown: (e) => { e.preventDefault(); e.stopPropagation(); o.onToggle(); sync(); } },
+  }, parent);
+  const sync = (v = o.get()) => {
+    btn.textContent = v ? label + ' 开' : label + ' 关';
+    btn.classList.toggle('on', v);
+  };
+  return { el: btn, sync };
+}
+
 let toastEl = null, toastTimer = 0;
 /** 屏幕中上方的提示条 */
 export function toast(msg, ms = 1800) {

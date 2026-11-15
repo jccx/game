@@ -1,6 +1,7 @@
 // 梦想乐园：界面和输入——开局菜单、顶栏、建造工具栏、过山车编辑器、财务、设施详情、存档。
 // 手机：点工具栏选工具，再点地图落子；电脑：数字键 1~4 换工具，Esc 关面板，空格暂停。
-import { el, toast, store, toggleFullscreen } from '../../shared/js/ui.js';
+import { el, toast, store, toggleFullscreen, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
+import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { Sfx } from '../../shared/js/audio.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { GRID, PATH, RIDES, SHOPS, BUILDING, TICKET, LOAN, RESEARCH, WEATHER, COASTER, SCENARIOS, DIFFICULTY } from './config.js';
@@ -70,7 +71,12 @@ export class Hud {
     this.wxEl = el('div', { cls: 'pwx', text: '☀️ 晴' }, top);
     // 右上：无敌开关（设置左边）、设置
     const right = el('div', { cls: 'pright' }, r), row = el('div', { cls: 'prow' }, right);
-    this.cheatEl = el('div', { cls: 'cheat', text: '免费建造 关', on: { pointerdown: (e) => { e.preventDefault(); this.park.god = !this.park.god; Sfx.play(this.park.god ? 'levelup' : 'click'); toast(this.park.god ? '免费建造已打开：建造和研究不花钱' : '免费建造已关闭'); } } }, row);
+    this.cheat = makeCheatButton(row, {
+      label: '免费建造',
+      get: () => this.park.god,
+      onToggle: () => { this.park.god = !this.park.god; Sfx.play(this.park.god ? 'levelup' : 'click'); toast(this.park.god ? '免费建造已打开：建造和研究不花钱' : '免费建造已关闭'); },
+    });
+    this.cheatEl = this.cheat.el;
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
     // 中间提示
     this.msgEl = el('div', { cls: 'pmsg' }, r);
@@ -330,13 +336,13 @@ export class Hud {
     if ((this.slowT -= dt) > 0) return;
     this.slowT = 0.08;
     const c = this.c;
-    const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } };
+    const set = makeMemo(c);
     set('money', Math.round(p.money), (v) => { this.moneyEl.textContent = fmtMoney(v); this.moneyEl.classList.toggle('neg', v < 0); });
     set('rep', Math.round(p.reputation), (v) => { this.repEl.textContent = `口碑 ${v}`; });
     set('vis', p.visitors.length, (v) => { this.visEl.textContent = `游客 ${v}`; });
     set('day', p.day, (v) => { this.dayEl.textContent = `第 ${v} 天`; });
     set('wx', p.weather, (v) => { const w = WEATHER[v]; this.wxEl.textContent = `${w.icon} ${w.name}`; });
-    set('god', p.god, (v) => { this.cheatEl.textContent = v ? '免费建造 开' : '免费建造 关'; this.cheatEl.classList.toggle('on', v); });
+    set('god', p.god, (v) => this.cheat.sync(v));
     set('ticket', p.ticketPrice, (v) => { this.bTicket.textContent = `票价 ¥${v}`; });
     // 过山车面板开着时，轨道一变就刷新
     if (this.panelMode === 'coaster' && this.coasterBody) {
@@ -356,14 +362,8 @@ export class Hud {
   openSettings() {
     const box = this.openOverlay('pset', true), st = this.api.stage;
     el('div', { cls: 'phead', html: '<h2>设置</h2>' }, box);
-    const row = (label) => { const r = el('div', { cls: 'set-row' }, box); el('span', { text: label }, r); return el('div', { cls: 'seg' }, r); };
-    const q = row('画质'), names = ['自动', ...QUALITY.map((x) => x.name)];
-    const mark = () => [...q.children].forEach((b, i) => b.classList.toggle('on', i === 0 ? st.auto : !st.auto && st.level === i - 1));
-    names.forEach((n, i) => el('button', { text: n, on: { click: () => { if (i === 0) st.setQuality(st.level, true); else st.setQuality(i - 1, false); mark(); } } }, q));
-    mark();
-    const s = row('声音'), smark = () => [...s.children].forEach((b, i) => b.classList.toggle('on', (i === 0) === !Sfx.muted));
-    ['开', '关'].forEach((n, i) => el('button', { text: n, on: { click: () => { Sfx.setMuted(i === 1); Sfx.unlock(); smark(); } } }, s));
-    smark();
+    qualityRow(box, st, ['自动', ...QUALITY.map((x) => x.name)]);
+    soundRow(box);
     const f = el('div', { cls: 'set-btns' }, box);
     el('button', { cls: 'g-b', text: '继续', on: { click: () => this.closeOverlay() } }, f);
     el('button', { cls: 'g-b ghost', text: '重新开始', on: { click: () => { this.closeOverlay(); this.api.restart(); } } }, f);

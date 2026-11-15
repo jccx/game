@@ -2,9 +2,10 @@
 // 手机：左下摇杆（步行时移动；开车时左右转向，上下也可以当油门/刹车；开飞机时上下是俯仰）；
 //      在屏幕右半边空白处拖动可以转镜头；右下是动作键（步行：攻击、上车、换武器；开车：油门、刹车、手刹、下车、开炮）。
 // 电脑：WASD 移动/驾驶，按住鼠标拖动转镜头，空格 攻击/手刹，F 上下车，Q 换武器，J 开炮，↑↓ 飞机俯仰，M 地图，Esc 设置。
-import { el, toast, toggleFullscreen, store } from '../../shared/js/ui.js';
+import { el, toast, toggleFullscreen, store, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
 import { Joystick, ActionButton, DragPad } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
+import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { fmtTime, clamp } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { WEAPONS, VEH } from './config.js';
@@ -50,7 +51,8 @@ export class Hud {
     this.radar.width = this.radar.height = 200; this.rctx = this.radar.getContext('2d');
     // 右上：无敌开关、钱、设置；下面是通缉星、生命/护甲、武器
     const right = el('div', { cls: 'c-right' }, r), row = el('div', { cls: 'c-row' }, right);
-    this.cheatEl = el('div', { cls: 'cheat', text: '无敌 关', on: { pointerdown: (e) => { e.preventDefault(); this.toggleGod(); } } }, row);
+    this.cheat = makeCheatButton(row, { get: () => this.sim.player.godT > 0, onToggle: () => this.toggleGod() });
+    this.cheatEl = this.cheat.el;
     this.moneyEl = el('div', { cls: 'money', text: '$0' }, row);
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
     this.starsEl = el('div', { cls: 'stars' }, right);
@@ -174,7 +176,7 @@ export class Hud {
 
   slow() {
     const sim = this.sim, p = sim.player, v = p.inVeh, c = this.c;
-    const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } };
+    const set = makeMemo(c);
     set('money', p.money, (x) => { this.moneyEl.textContent = '$' + x; });
     set('stars', sim.stars + (sim.stars > 0 && !sim.seen && sim.unseenT > 3 ? 0.5 : 0), (x) => {
       const n = Math.floor(x); this.starsEl.innerHTML = '★'.repeat(n) + '<i>' + '★'.repeat(5 - n) + '</i>'; this.starsEl.classList.toggle('blink', x % 1 > 0);
@@ -183,7 +185,7 @@ export class Hud {
     set('ar', Math.ceil(p.armor), (x) => { this.arEl.style.width = x + '%'; this.arEl.parentNode.style.visibility = x > 0 ? '' : 'hidden'; });
     const wp = WEAPONS[p.weapon];
     set('wp', wp.name + (wp.melee ? '' : ' ' + p.ammo[p.weapon]), (x) => { this.wpEl.textContent = x; });
-    set('god', p.godT > 0, (x) => { this.cheatEl.textContent = x ? '无敌 开' : '无敌 关'; this.cheatEl.classList.toggle('on', x); });
+    set('god', p.godT > 0, (x) => this.cheat.sync(x));
     set('dead', p.dead, (x) => { this.wasted.classList.toggle('show', x); });
     // 按钮：步行和开车两套
     const cls = v ? v.spec.cls : '';
@@ -274,14 +276,8 @@ export class Hud {
   openSettings() {
     const box = this.openOverlay('cset'), st = this.api.stage;
     el('div', { cls: 'cbox-head', html: '<b>设置</b>' }, box);
-    const row = (label) => { const r = el('div', { cls: 'set-row' }, box); el('span', { text: label }, r); return el('div', { cls: 'seg' }, r); };
-    const q = row('画质'), names = ['自动', ...QUALITY.map((x) => x.name)];
-    const mark = () => [...q.children].forEach((b, i) => b.classList.toggle('on', i === 0 ? st.auto : !st.auto && st.level === i - 1));
-    names.forEach((n, i) => el('button', { text: n, on: { click: () => { if (i === 0) st.setQuality(st.level, true); else st.setQuality(i - 1, false); mark(); } } }, q));
-    mark();
-    const s = row('声音'), smark = () => [...s.children].forEach((b, i) => b.classList.toggle('on', (i === 0) === !Sfx.muted));
-    ['开', '关'].forEach((n, i) => el('button', { text: n, on: { click: () => { Sfx.setMuted(i === 1); Sfx.unlock(); smark(); } } }, s));
-    smark();
+    qualityRow(box, st, ['自动', ...QUALITY.map((x) => x.name)]);
+    soundRow(box);
     const f = el('div', { cls: 'set-btns' }, box);
     el('button', { cls: 'g-b', text: '继续游戏', on: { click: () => this.closeOverlay() } }, f);
     el('button', { cls: 'g-b ghost', text: '地图和任务', on: { click: () => this.openMap() } }, f);

@@ -3,9 +3,10 @@
 // 另有回城、恢复、闪现、补兵、推塔、快捷购买（小地图下方）、小地图、战况；
 // 屏幕顶部偏右一排：无敌（作弊开关）、商店、金币、战绩、设置。
 // 电脑上：WASD 移动，J/空格/鼠标左键普攻，Q/E/R 技能（朝鼠标位置），1/2/3 加点，B 回城，F 闪现，G 恢复，P 商店，Esc 设置。
-import { el, toast, toggleFullscreen } from '../../shared/js/ui.js';
+import { el, toast, toggleFullscreen, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
 import { Joystick, ActionButton } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
+import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { fmtTime } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { KIND } from './entities.js';
@@ -85,7 +86,9 @@ export class Hud {
     // 右上：从左到右依次是 无敌（作弊）、商店、金币，然后是战绩和设置
     const right = el('div', { cls: 'hud-right' }, r);
     const main = el('div', { cls: 'hr-row' }, right), sub = el('div', { cls: 'hr-row' }, right);
-    this.cheatEl = el('div', { cls: 'cheat', text: '无敌 关', on: { pointerdown: (e) => { e.preventDefault(); e.stopPropagation(); this.pend.god = true; } } }, main);
+    // 无敌是“挂起式”：点一下把 pend.god 置 true，下一帧逻辑里才切换开关，按钮状态由 slow() 里的 sync 刷新
+    this.cheat = makeCheatButton(main, { get: () => P.godT > 0, onToggle: () => { this.pend.god = true; } });
+    this.cheatEl = this.cheat.el;
     this.shopBtn = el('div', { cls: 'g-ic shop-btn', html: ICONS.shop, on: { pointerdown: (e) => { e.preventDefault(); this.openShop(); } } }, main);
     this.goldEl = el('div', { cls: 'gold', text: '300' }, main);
     this.kdaEl = el('div', { cls: 'kda', text: '0/0/0' }, sub);
@@ -327,7 +330,7 @@ export class Hud {
   /** 低频更新的文字和状态 */
   slow() {
     const P = this.P, g = this.game, c = this.c;
-    const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } };
+    const set = makeMemo(c);
     set('gold', Math.floor(P.gold), (v) => { this.goldEl.textContent = v; });
     set('kda', `${P.kills}/${P.deaths}/${P.assists}`, (v) => { this.kdaEl.textContent = v; });
     set('sb', g.teamKills[0], (v) => { this.scoreB.textContent = v; });
@@ -356,10 +359,7 @@ export class Hud {
       this.quick.innerHTML = `<b>${it.name}</b><span>${it.cost}</span>`;
     });
     // 作弊按钮：显示无敌开关的状态
-    set('god', P.godT > 0, (v) => {
-      this.cheatEl.textContent = v ? '无敌 开' : '无敌 关';
-      this.cheatEl.classList.toggle('on', v);
-    });
+    set('god', P.godT > 0, (v) => this.cheat.sync(v));
     // 阵亡遮罩
     set('dead', !P.alive, (v) => { this.deadEl.classList.toggle('show', v && !g.over); });
     if (!P.alive) this.deadTxt.textContent = `${Math.ceil(P.respawnT)} 秒后复活`;
@@ -434,16 +434,8 @@ export class Hud {
   openSettings() {
     const box = this.openOverlay('set', true), st = this.api.stage;
     el('div', { cls: 'box-head', html: '<b>设置</b>' }, box);
-    const row = (label) => { const r = el('div', { cls: 'set-row' }, box); el('span', { text: label }, r); return el('div', { cls: 'seg' }, r); };
-    const q = row('画质');
-    const names = ['自动', ...QUALITY.map((x) => x.name)];
-    const mark = () => [...q.children].forEach((b, i) => b.classList.toggle('on', i === 0 ? st.auto : !st.auto && st.level === i - 1));
-    names.forEach((n, i) => el('button', { text: n, on: { click: () => { if (i === 0) st.setQuality(st.level, true); else st.setQuality(i - 1, false); mark(); } } }, q));
-    mark();
-    const s = row('声音');
-    const smark = () => [...s.children].forEach((b, i) => b.classList.toggle('on', (i === 0) === !Sfx.muted));
-    ['开', '关'].forEach((n, i) => el('button', { text: n, on: { click: () => { Sfx.setMuted(i === 1); Sfx.unlock(); smark(); } } }, s));
-    smark();
+    qualityRow(box, st, ['自动', ...QUALITY.map((x) => x.name)]);
+    soundRow(box);
     const f = el('div', { cls: 'set-btns' }, box);
     el('button', { cls: 'g-b', text: '继续游戏', on: { click: () => this.closeOverlay() } }, f);
     el('button', { cls: 'g-b ghost', text: '全屏', on: { click: () => toggleFullscreen() } }, f);

@@ -49,10 +49,22 @@ for (const vname of quick ? ['landscape'] : ['landscape', 'portrait']) {
   const ch = await center(page, '.cheat');
   await page.touchscreen.tap(ch.x, ch.y); await sleep(300);
   check((await st()).god, `${vname} 点“无敌”后打开`, log);
-  // 让电脑代跑到终点，检查结算界面
-  await page.evaluate(() => { const m = window.__kart, r = m.race, p = r.player; p.ai = { speed: 1, line: 0, lineT: 2, nitroT: 5, itemT: 0 }; for (let i = 0; i < 400 && r.state !== 'done'; i++) m.loop.fastForward(1); });
-  await sleep(3500);
-  const end = await page.$('.kend .kend-row');
+  // 让电脑代跑到终点，检查结算界面。先把玩家放回当前路段的中心线、朝向与路段一致：
+  // 前面的手动操作（摇杆、漂移、氮气）可能把车甩到赛道外甚至调头，电脑代跑要从那种状态
+  // 恢复过来耗时不定，400 秒未必够——结算检查测的是“跑完能出结算”，不是“电脑会调头”，
+  // 所以代跑起点固定在中心线上。只改测试，不改游戏（2026-11-15：此检查在改动前就时好时坏，
+  // 原始代码 5d7abfc5 上也复现过同样失败，横竖屏各一次）。
+  await page.evaluate(() => {
+    const m = window.__kart, r = m.race, p = r.player, s = r.track.s[p.si];
+    p.x = s.x; p.z = s.z; p.yaw = Math.atan2(s.tx, s.tz); p.vdir = p.yaw; p.v = 0; p.off = 0;
+    p.drifting = false; p.spinT = 0; p.in = { steer: 0, gas: false, brake: false, drift: false, boost: false, use: false };
+    p.ai = { speed: 1, line: 0, lineT: 2, nitroT: 5, itemT: 0 };
+    for (let i = 0; i < 400 && r.state !== 'done'; i++) m.loop.fastForward(1);
+  });
+  // 结算面板是冲线 2.6 秒（游戏内计时）后才弹出，无头帧率低时这 2.6 秒比真实 3.5 秒还长，
+  // 所以不等固定时间，直接等到结算行出现（最多 15 秒）。只改测试，不改游戏。
+  let end = null;
+  try { end = await page.waitForSelector('.kend .kend-row', { timeout: 15000 }); } catch { /* 超时则 end 为空，下面判 FAIL */ }
   check(!!end, `${vname} 跑完三圈后出现结算名单`, log);
   await shot(page, `kart-${vname}-end`);
   check(bad(errors).length === 0, `${vname} 无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);

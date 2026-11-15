@@ -2,9 +2,10 @@
 // 手机：左下 ◀ ▶ 走、跳、后翻；右下大键“开火”（按住拖动瞄准，拖的方向是发射方向，距离是力度，松手发射，拖回中心取消）；
 // 武器键打开武器面板。空袭和传送先点一下地图选位置，再拖开火键发射。
 // 电脑：A/D 或方向键走，W 或空格跳，S 或 F 后翻，数字键 1~8 选武器，Enter 跳过回合，Esc 设置。
-import { el, toast, store, toggleFullscreen } from '../../shared/js/ui.js';
+import { el, toast, store, toggleFullscreen, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
 import { ActionButton } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
+import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { WEAPONS, WEAPON, TEAMS, DIFFICULTY, THEMES, RULES } from './config.js';
 import { QUALITY2D } from './render.js';
 
@@ -86,7 +87,11 @@ export class Hud {
     });
     // 右上：无敌开关、设置；下面是跳过回合和全景
     const right = el('div', { cls: 'aright' }, r), row = el('div', { cls: 'arow' }, right);
-    this.cheatEl = el('div', { cls: 'cheat', text: '无敌 关', on: { pointerdown: (e) => { e.preventDefault(); this.game.god = !this.game.god; Sfx.play(this.game.god ? 'levelup' : 'click'); toast(this.game.god ? '无敌已打开：挨炸不掉血，落水回到上一个落脚点' : '无敌已关闭'); } } }, row);
+    this.cheat = makeCheatButton(row, {
+      get: () => this.game.god,
+      onToggle: () => { this.game.god = !this.game.god; Sfx.play(this.game.god ? 'levelup' : 'click'); toast(this.game.god ? '无敌已打开：挨炸不掉血，落水回到上一个落脚点' : '无敌已关闭'); },
+    });
+    this.cheatEl = this.cheat.el;
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
     const rowB = el('div', { cls: 'arow' }, right);
     this.skipEl = el('button', { cls: 'g-b ghost sm askip', text: '跳过回合', on: { click: () => { if (this.game.skip()) Sfx.play('click'); } } }, rowB);
@@ -199,12 +204,12 @@ export class Hud {
     if ((this._slowT = (this._slowT || 0) - dt) > 0) return;
     this._slowT = 0.08;
     const c = this.c;
-    const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } };
+    const set = makeMemo(c);
     const t = g.turn;
     set('turn', t.bean ? `${g.teams[t.team]?.def.name || ''} · ${t.bean.name}` : '准备…', (v) => { this.turnEl.textContent = v; });
     set('time', t.bean ? Math.max(0, Math.ceil(t.t)) : 0, (v) => { this.timeEl.textContent = String(v); this.timeEl.classList.toggle('low', v <= 5 && v > 0); });
     set('wind', Math.round(g.wind * 10) / 10, (v) => { this.windEl.textContent = v === 0 ? '无风' : `风 ${v > 0 ? '→' : '←'} ${Math.abs(v * 10).toFixed(0)}`; });
-    set('god', g.god, (v) => { this.cheatEl.textContent = v ? '无敌 开' : '无敌 关'; this.cheatEl.classList.toggle('on', v); });
+    set('god', g.god, (v) => this.cheat.sync(v));
     set('myturn', g.myTurn, (v) => { this.skipEl.disabled = !v; this.bFire.setEnabled(v); this.bWeapon.setEnabled(v); });
     set('weapon', t.weapon + '|' + (g.teams[t.team]?.ammo[t.weapon] ?? ''), (v) => {
       const w = WEAPON[t.weapon], ammo = g.teams[t.team]?.ammo[t.weapon];
@@ -250,14 +255,8 @@ export class Hud {
   openSettings() {
     const box = this.openOverlay('aset', true), v = this.view;
     el('div', { cls: 'ahead', html: '<h2>设置</h2>' }, box);
-    const row = (label) => { const r = el('div', { cls: 'set-row' }, box); el('span', { text: label }, r); return el('div', { cls: 'seg' }, r); };
-    const q = row('画质'), names = ['自动', ...QUALITY2D.map((x) => x.name)];
-    const mark = () => [...q.children].forEach((b, i) => b.classList.toggle('on', i === 0 ? v.auto : !v.auto && v.level === i - 1));
-    names.forEach((n, i) => el('button', { text: n, on: { click: () => { if (i === 0) v.setQuality(v.level, true); else v.setQuality(i - 1, false); mark(); } } }, q));
-    mark();
-    const s = row('声音'), smark = () => [...s.children].forEach((b, i) => b.classList.toggle('on', (i === 0) === !Sfx.muted));
-    ['开', '关'].forEach((n, i) => el('button', { text: n, on: { click: () => { Sfx.setMuted(i === 1); Sfx.unlock(); smark(); } } }, s));
-    smark();
+    qualityRow(box, v, ['自动', ...QUALITY2D.map((x) => x.name)]);
+    soundRow(box);
     const f = el('div', { cls: 'set-btns' }, box);
     el('button', { cls: 'g-b', text: '继续', on: { click: () => this.closeOverlay() } }, f);
     el('button', { cls: 'g-b ghost', text: '重新开始', on: { click: () => { this.closeOverlay(); this.api.restart(); } } }, f);

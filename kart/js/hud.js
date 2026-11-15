@@ -1,9 +1,10 @@
 // 疾风卡丁：界面和输入——开局菜单、比赛中的仪表和按键、结算。
 // 手机：左下摇杆左右转向（自动给油）；右下“漂移”（按住）、“氮气”、“道具”、“刹车”。
 // 电脑：A/D 或方向键转向，Shift 或 空格 漂移，J 氮气，K 道具，S 或 ↓ 刹车，Esc 设置。
-import { el, toast, store, toggleFullscreen } from '../../shared/js/ui.js';
+import { el, toast, store, toggleFullscreen, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
 import { Joystick, ActionButton } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
+import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { KART, ITEMS, DIFFICULTY, RACERS } from './config.js';
 import { TRACKS, buildTrack } from './tracks.js';
@@ -76,7 +77,11 @@ export class Hud {
     this.lapEl = el('div', { cls: 'klap' }, st); this.timeEl = el('div', { cls: 'ktime', text: '0:00.00' }, st);
     // 右上：无敌开关、设置；下面是小地图
     const right = el('div', { cls: 'kright' }, r), row = el('div', { cls: 'krow' }, right);
-    this.cheatEl = el('div', { cls: 'cheat', text: '无敌 关', on: { pointerdown: (e) => { e.preventDefault(); P.god = !P.god; Sfx.play(P.god ? 'levelup' : 'click'); toast(P.god ? '无敌已打开：不怕道具，蹭墙不掉速' : '无敌已关闭'); } } }, row);
+    this.cheat = makeCheatButton(row, {
+      get: () => P.god,
+      onToggle: () => { P.god = !P.god; Sfx.play(P.god ? 'levelup' : 'click'); toast(P.god ? '无敌已打开：不怕道具，蹭墙不掉速' : '无敌已关闭'); },
+    });
+    this.cheatEl = this.cheat.el;
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
     this.mini = el('canvas', { cls: 'kmini' }, right); this.mini.width = this.mini.height = 180; this.mctx = this.mini.getContext('2d');
     // 中间：倒计时、提示
@@ -135,7 +140,7 @@ export class Hud {
     if (race.state === 'done' && !this.overlay && (this.endT += dt) > 2.6) this.openEnd();     // 冲线后稍等一下再弹结算
     if ((this.slowT -= dt) > 0) return;
     this.slowT = 0.08;
-    const set = (key, val, fn) => { if (c[key] !== val) { c[key] = val; fn(val); } };
+    const set = makeMemo(c);
     set('place', P.place, (v) => { this.placeEl.firstChild.textContent = v; });
     set('lap', Math.min(race.laps, Math.max(1, P.lap)), (v) => { this.lapEl.textContent = `第 ${v}/${race.laps} 圈`; });
     this.timeEl.textContent = fmt(P.finished ? P.finishTime : race.time);
@@ -143,7 +148,7 @@ export class Hud {
     set('gauge', Math.round(P.gauge * 50), (v) => { this.gaugeEl.style.width = v * 2 + '%'; });
     set('nitro', P.nitro, (v) => { this.bNitro.setBadge(v ? '×' + v : ''); this.bNitro.setEnabled(v > 0); });
     set('item', P.item || '', (v) => { this.bItem.setIcon(v ? `<span class="emoji">${ITEMS[v].icon}</span>` : ''); this.bItem.setEnabled(!!v); this.bItem.setLabel(v ? ITEMS[v].name : '道具'); });
-    set('god', P.god, (v) => { this.cheatEl.textContent = v ? '无敌 开' : '无敌 关'; this.cheatEl.classList.toggle('on', v); });
+    set('god', P.god, (v) => this.cheat.sync(v));
     set('wrong', P.wrong > 0.8, (v) => { if (v) this.msg('方向反了！', '调头', 1.5); });
     this.drawMini();
   }
@@ -171,14 +176,8 @@ export class Hud {
   openSettings() {
     const box = this.openOverlay('kset', true), st = this.api.stage;
     el('div', { cls: 'khead', html: '<h2>设置</h2>' }, box);
-    const row = (label) => { const r = el('div', { cls: 'set-row' }, box); el('span', { text: label }, r); return el('div', { cls: 'seg' }, r); };
-    const q = row('画质'), names = ['自动', ...QUALITY.map((x) => x.name)];
-    const mark = () => [...q.children].forEach((b, i) => b.classList.toggle('on', i === 0 ? st.auto : !st.auto && st.level === i - 1));
-    names.forEach((n, i) => el('button', { text: n, on: { click: () => { if (i === 0) st.setQuality(st.level, true); else st.setQuality(i - 1, false); mark(); } } }, q));
-    mark();
-    const s = row('声音'), smark = () => [...s.children].forEach((b, i) => b.classList.toggle('on', (i === 0) === !Sfx.muted));
-    ['开', '关'].forEach((n, i) => el('button', { text: n, on: { click: () => { Sfx.setMuted(i === 1); Sfx.unlock(); smark(); } } }, s));
-    smark();
+    qualityRow(box, st, ['自动', ...QUALITY.map((x) => x.name)]);
+    soundRow(box);
     const f = el('div', { cls: 'set-btns' }, box);
     el('button', { cls: 'g-b', text: '继续比赛', on: { click: () => this.closeOverlay() } }, f);
     el('button', { cls: 'g-b ghost', text: '重新开始', on: { click: () => { this.closeOverlay(); this.api.restart(); } } }, f);
