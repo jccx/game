@@ -1,0 +1,78 @@
+/* 梦想乐园的界面样式。尺寸单位 --u 定义在 shared/css/base.css。默认横屏，末尾是竖屏的调整。 */
+
+.g-hud > .ptop, .g-hud > .pright, .g-hud > .pmsg { pointer-events: none; }
+
+/* ---------- 顶栏：金钱 / 口碑 / 游客 / 日期 / 天气 ---------- */
+.ptop { position: absolute; left: calc(var(--sl) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); display: flex; flex-wrap: wrap; gap: calc(var(--u) * 1.2); max-width: 58%; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
+.ptop > div { background: rgba(8,12,22,.6); border: 1px solid var(--line); border-radius: calc(var(--u) * 1.6); padding: calc(var(--u) * .8) calc(var(--u) * 2); font-size: calc(var(--u) * 3.2); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pmoney { color: var(--gold); }
+.pmoney.neg { color: #ff5a5a; }
+
+/* ---------- 右上：免费建造开关、设置 ---------- */
+.pright { position: absolute; right: calc(var(--sr) + var(--u) * 2); top: calc(var(--st) + var(--u) * 2); display: flex; flex-direction: column; align-items: flex-end; gap: calc(var(--u) * 1.2); }
+.prow { display: flex; gap: calc(var(--u) * 1.5); align-items: center; }
+.prow > * { pointer-events: auto; }
+.g-ic svg { width: 62%; height: 62%; }
+
+/* ---------- 中间提示 ---------- */
+.pmsg { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .2s; padding: calc(var(--u) * 1) calc(var(--u) * 5); border-radius: 999px; background: rgba(8,12,22,.6); white-space: nowrap; }
+.pmsg.show { opacity: 1; }
+.pmsg b { display: block; font-size: calc(var(--u) * 4.2); color: #ffe066; }
+.pmsg span { font-size: calc(var(--u) * 2.8); color: #d6def2; }
+
+/* ---------- 建造面板（工具栏上方弹出） ---------- */
+.ppanel { position: absolute; left: calc(var(--sl) + var(--u) * 2); bottom: calc(var(--sb) + var(--u) * 15); width: min(92vw, calc(var(--u) * 130)); max-height: 52%; display: flex; flex-direction: column; padding: calc(var(--u) * 2) calc(var(--u) * 2.5); gap: calc(var(--u) * 1.2); }
+.pp-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 2); flex: none; }
+.pp-head b { font-size: calc(var(--u) * 4); }
+.pp-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: calc(var(--u) * .8); }
+.pp-body h3 { margin: calc(var(--u) * 1) 0 0; font-size: calc(var(--u) * 3); color: #e0c8a0; font-weight: 600; }
+.pp-row { display: grid; grid-template-columns: 2em 5em 1fr auto; align-items: center; gap: calc(var(--u) * 1.4); padding: calc(var(--u) * 1.2) calc(var(--u) * 2); border-radius: calc(var(--u) * 1.4); border: 1px solid var(--line); background: rgba(255,255,255,.05); color: inherit; font: inherit; text-align: left; touch-action: manipulation; }
+.pp-row .emoji { font-size: calc(var(--u) * 5); }
+.pp-row b { font-size: calc(var(--u) * 3.4); }
+.pp-row span { font-size: calc(var(--u) * 2.6); color: #b9c4dc; }
+.pp-row em { font-style: normal; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+.pp-row.off { opacity: .45; }
+.pp-info { font-size: calc(var(--u) * 3); line-height: 1.7; color: #d6def2; font-variant-numeric: tabular-nums; }
+.pp-btns { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 1.4); }
+.emoji { font-size: calc(var(--u) * 7); line-height: 1; }
+
+/* ---------- 底部工具栏：单行，窄屏时横向滚动，不换行盖住地图 ---------- */
+.pbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--sb) + var(--u) * 2); display: flex; flex-wrap: nowrap; justify-content: flex-start; gap: calc(var(--u) * 1.2); width: max-content; max-width: calc(100vw - var(--sl) - var(--sr) - var(--u) * 2); overflow-x: auto; scrollbar-width: none; padding-bottom: calc(var(--u) * .5); }
+.pbar::-webkit-scrollbar { display: none; }
+.pbar .g-b { flex: none; min-height: calc(var(--u) * 9); padding: 0 calc(var(--u) * 2.4); font-size: calc(var(--u) * 3.2); }
+.pbar .g-b.on { background: linear-gradient(#f3c85a, #c8922a); color: #2a1c00; }
+
+/* ---------- 菜单、设置、破产 ---------- */
+.pmenu { background: radial-gradient(circle at 50% 10%, #1d3a24, #0a0e18 75%); }
+.pbox { position: relative; width: min(96vw, calc(var(--u) * 170)); max-height: 100%; min-height: 0; padding: calc(var(--u) * 3) calc(var(--u) * 3.5); display: flex; flex-direction: column; gap: calc(var(--u) * 2); }
+.pset .pbox, .pend .pbox { width: min(94vw, calc(var(--u) * 120)); }
+.phead { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 2); flex: none; flex-wrap: wrap; }
+.phead h1 { margin: 0; font-size: calc(var(--u) * 6.4); font-style: italic; letter-spacing: .06em; white-space: nowrap; background: linear-gradient(#d8ffd0, #58a858); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.phead h2 { margin: 0; font-size: calc(var(--u) * 6.4); font-style: italic; }
+.pacts { display: flex; align-items: center; gap: calc(var(--u) * 1.6); flex-wrap: wrap; }
+.pacts a { text-decoration: none; }
+.pacts .start { min-width: calc(var(--u) * 32); min-height: calc(var(--u) * 11); font-size: calc(var(--u) * 4.2); box-shadow: 0 0 calc(var(--u) * 3) rgba(246,208,106,.45); }
+.pbody { flex: 1 1 auto; min-height: 0; padding-right: calc(var(--u) * 1); }
+.pbody h3 { margin: calc(var(--u) * 1) 0 calc(var(--u) * 1.4); font-size: calc(var(--u) * 3); color: #e0c8a0; font-weight: 600; }
+.ptracks { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--u) * 1.6); }
+.ptrack { display: flex; flex-direction: column; align-items: flex-start; gap: .15em; padding: calc(var(--u) * 1.6); border-radius: calc(var(--u) * 2); border: 1px solid var(--line); background: rgba(255,255,255,.05); color: inherit; font: inherit; text-align: left; touch-action: manipulation; min-width: 0; }
+.ptrack b { font-size: calc(var(--u) * 3.6); }
+.ptrack span { font-size: calc(var(--u) * 2.5); color: #b9c4dc; line-height: 1.5; }
+.ptrack i { font-style: normal; font-size: calc(var(--u) * 2.5); color: var(--gold); }
+.ptrack.on { border-color: var(--gold); background: rgba(246,208,106,.12); box-shadow: 0 0 calc(var(--u) * 2.5) rgba(246,208,106,.25); }
+.ptip { margin: calc(var(--u) * 2) 0 0; font-size: calc(var(--u) * 2.7); color: #aab5cf; line-height: 1.6; }
+.pend-list { display: flex; flex-direction: column; gap: calc(var(--u) * .6); flex: 1 1 auto; min-height: 0; }
+.pend-row { display: flex; justify-content: space-between; gap: calc(var(--u) * 2); padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: calc(var(--u) * 1.4); background: rgba(255,255,255,.05); font-size: calc(var(--u) * 3); font-variant-numeric: tabular-nums; }
+.pend-row em { font-style: normal; font-weight: 700; color: var(--gold); }
+
+/* ---------- 竖屏 ---------- */
+@media (orientation: portrait) {
+  .ptop { max-width: 52%; }
+  .ptracks { grid-template-columns: 1fr; }
+  .ppanel { bottom: calc(var(--sb) + var(--u) * 22); max-height: 46%; }
+  .phead h1 { font-size: calc(var(--u) * 5.4); }
+  .pacts .start { min-width: calc(var(--u) * 26); }
+  /* 竖屏把工具栏按钮收小，9 个按钮不用横向滚动就能全看到 */
+  .pbar { gap: calc(var(--u) * .8); }
+  .pbar .g-b { font-size: calc(var(--u) * 2.8); padding: 0 calc(var(--u) * 1.2); min-height: calc(var(--u) * 8); }
+}
