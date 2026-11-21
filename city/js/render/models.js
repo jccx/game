@@ -35,8 +35,8 @@ function rider(b, y, z, shirt = 0xe8793a) {
 }
 
 /**
- * 生成一辆车的模型。返回 { group, body, prop?, light?, rider? }：
- * prop 螺旋桨（飞机），light 警灯（警车），rider 乘员（摩托、船，只在有人开时显示）。
+ * 生成一辆车的模型。返回 { group, body, prop?, rotor?, light?, rider? }：
+ * prop 螺旋桨（飞机），rotor 主旋翼（直升机），light 警灯（警车），rider 乘员（摩托、船，只在有人开时显示）。
  */
 export function buildVehicle(type, color) {
   const s = VEH[type], b = new Builder(), group = new THREE.Group(), out = { group };
@@ -84,6 +84,25 @@ export function buildVehicle(type, color) {
       out.prop = new Builder().box(2.8, 0.26, 0.08, 0x2a2e36).box(0.26, 2.8, 0.08, 0x2a2e36).sphere(0.22, 0xd0362e, 0, 0, 0.1).mesh(MAT.vcFlat, true);
       out.prop.position.set(0, 1.7, L * 0.3 + 1.75); group.add(out.prop);
       break;
+    case 'heli': {
+      // 直升机：圆头机舱、尾梁、垂尾、尾桨、滑橇起落架；主旋翼单独做 rotor，view.js 里绕 Y 轴转
+      b.box(W * 0.9, 1.15, L * 0.42, [darker(color), color], 0, 1.35, L * 0.14)           // 机舱
+        .box(W * 0.78, 0.75, 0.5, GLASS, 0, 1.45, L * 0.36)                                // 风挡
+        .box(0.55, 0.5, L * 0.42, [darker(color), color], 0, 1.7, -L * 0.28)              // 尾梁
+        .box(0.14, 1.3, 1.0, [color, 0xd0362e], 0, 2.15, -L * 0.5)                        // 垂尾
+        .box(W * 0.7, 0.1, 1.2, darker(color, 0.5), 0, 2.0, L * 0.1)                      // 旋翼底座
+        .cyl(0.05, 0.05, 0.9, 0x50545c, -W * 0.42, 0.55, L * 0.3, 0, 0, 0, 5)             // 起落架支柱
+        .cyl(0.05, 0.05, 0.9, 0x50545c, W * 0.42, 0.55, L * 0.3, 0, 0, 0, 5)
+        .cyl(0.05, 0.05, 0.9, 0x50545c, -W * 0.42, 0.55, -L * 0.15, 0, 0, 0, 5)
+        .cyl(0.05, 0.05, 0.9, 0x50545c, W * 0.42, 0.55, -L * 0.15, 0, 0, 0, 5)
+        .cyl(0.06, 0.06, 1.6, 0x2a2e36, -W * 0.42, 0.12, L * 0.08, Math.PI / 2, 0, 0, 5)  // 左滑橇
+        .cyl(0.06, 0.06, 1.6, 0x2a2e36, W * 0.42, 0.12, L * 0.08, Math.PI / 2, 0, 0, 5)   // 右滑橇
+        .box(0.08, 1.1, 0.12, 0x2a2e36, W * 0.32, 2.0, -L * 0.5)                          // 尾桨（竖）
+        .box(0.08, 0.12, 1.1, 0x2a2e36, W * 0.32, 2.0, -L * 0.5);                         // 尾桨（横）
+      out.rotor = new Builder().box(7.6, 0.07, 0.45, 0x2a2e36).box(0.45, 0.07, 7.6, 0x2a2e36).sphere(0.22, 0xd0362e, 0, 0, 0).mesh(MAT.vcFlat, true);
+      out.rotor.position.set(0, 2.15, L * 0.1); group.add(out.rotor);
+      break;
+    }
     case 'tank':
       b.box(W * 0.8, 1.0, L * 0.92, [darker(color), color], 0, 1.15, 0)
         .box(0.75, 1.0, L, [0x202226, 0x3a3e44], -W / 2 + 0.38, 0.55, 0).box(0.75, 1.0, L, [0x202226, 0x3a3e44], W / 2 - 0.38, 0.55, 0)

@@ -25,6 +25,7 @@
 .c-hp i, .c-ar i { display: block; height: 100%; width: 100%; }
 .c-hp i { background: linear-gradient(#ff8a7a, #d8362c); } .c-ar i { background: linear-gradient(#8fd0ff, #3a86d8); width: 0; }
 .c-wp { padding: calc(var(--u) * .8) calc(var(--u) * 2.2); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); font-size: calc(var(--u) * 3); font-variant-numeric: tabular-nums; }
+.c-wp.flash { border-color: #7dff9a; color: #7dff9a; animation: blink .3s steps(2) 2; }
 
 /* ---------- 任务目标、横幅、速度、倒地 ---------- */
 .obj { position: absolute; left: 50%; top: calc(var(--st) + var(--u) * 2); transform: translateX(-50%); max-width: 44vw; padding: calc(var(--u) * 1.2) calc(var(--u) * 3); border-radius: calc(var(--u) * 2); background: rgba(8,12,22,.7); border: 1px solid var(--line); display: none; text-align: center; }

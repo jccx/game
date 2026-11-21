@@ -96,6 +96,76 @@ if (!quick) {
   check(bad(errors).length === 0, `载具巡礼无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
   await page.close();
 }
+// 新功能：出生全武器、自动补满、直升机、行人密度——五种手机尺寸横竖屏（只在完整模式下）
+if (!quick) {
+  const phone = (w, h) => ({ width: w, height: h, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const sizes = { 'landscape-844x390': phone(844, 390), 'portrait-390x844': phone(390, 844), 'small-land-667x375': phone(667, 375), 'small-port-360x640': phone(360, 640), 'short-land-740x320': phone(740, 320) };
+  for (const [name, view] of Object.entries(sizes)) {
+    const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', view);
+    await ready(page);
+    await sleep(1200);
+    // 出生全武器：数字键 1~5 直接切
+    const spawn = await page.evaluate(() => { const p = window.__city.sim.player; return { owned: p.owned.slice(), ammo: p.ammo.slice() }; });
+    check(spawn.owned.every(Boolean) && spawn.ammo[1] === 80 && spawn.ammo[4] === 6, `${name} 出生拥有全部 5 种武器（手枪 80 发、火箭筒 6 发）`, log);
+    await page.keyboard.press('Digit3'); await sleep(200);
+    let w = await page.evaluate(() => window.__city.sim.player.weapon);
+    check(w === 2, `${name} 按数字键 3 切到冲锋枪`, log);
+    await page.keyboard.press('Digit5'); await sleep(200);
+    w = await page.evaluate(() => window.__city.sim.player.weapon);
+    check(w === 4, `${name} 按数字键 5 切到火箭筒`, log);
+    // 打空一把自动补满：只剩 1 发时开一枪
+    const refill = await page.evaluate(() => {
+      const s = window.__city.sim, p = s.player;
+      p.weapon = 1; p.ammo[1] = 1; p.shootCd = 0; s.ctl.aimYaw = 0; s.ctl.fire = true;
+      s.update(1 / 30); s.ctl.fire = false; s.events.length = 0;
+      return p.ammo[1];
+    });
+    check(refill === 80, `${name} 手枪剩 1 发时开一枪，打空后自动补满到 80 发（当前 ${refill}）`, log);
+    // 直升机：上机、原地升空、悬停、降落、下机
+    await page.evaluate(() => {
+      const m = window.__city, s = m.sim, p = s.player, h = s.vehicles.find((v) => v.type === 'heli');
+      p.hp = 100; p.godT = Infinity;
+      p.x = p.px = h.x + 2.5; p.z = p.pz = h.z; p.y = s.world.groundY(p.x, p.z);
+      m.hud.locked = true;
+      s.ctl.enter = true; s.update(1 / 30); s.events.length = 0;
+    });
+    let st = await page.evaluate(() => { const s = window.__city.sim; return { veh: s.player.inVeh ? s.player.inVeh.type : null }; });
+    check(st.veh === 'heli', `${name} 走到机场直升机旁上机`, log);
+    await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.pitch = 1; c.gas = 0; m.loop.fastForward(3); c.pitch = 0; });   // 升空后立即收杆，不然真实循环在截图等待时还会继续爬升
+    await sleep(600);
+    await shot(page, `city-heli-${name}`);
+    st = await page.evaluate(() => { const v = window.__city.sim.player.inVeh; return { flying: v.flying, y: v.y, speed: v.speed }; });
+    check(st.flying && st.y > 20 && Math.abs(st.speed) < 1, `${name} 直升机原地升空到 ${st.y.toFixed(0)} 米（不用跑道）`, log);
+    const hover = await page.evaluate(() => {
+      const m = window.__city, c = m.sim.ctl, v = m.sim.player.inVeh, y0 = v.y;
+      c.pitch = 0; c.gas = 0; c.steer = 0; m.loop.fastForward(2);
+      return { dy: Math.abs(v.y - y0), flying: v.flying };
+    });
+    check(hover.flying && hover.dy < 1.5, `${name} 悬停 2 秒高度变化 ${hover.dy.toFixed(1)} 米`, log);
+    const land = await page.evaluate(() => {
+      const m = window.__city, c = m.sim.ctl, v = m.sim.player.inVeh;
+      const secs = Math.ceil((v.y - 2) / 5.2) + 2;   // 轻推是 -5.2 米/秒，按实际高度算够用的时间
+      c.pitch = -0.4; c.gas = 0; c.steer = 0; m.loop.fastForward(secs);
+      const ok = !v.flying && v.alive;
+      if (ok) { m.sim.ctl.enter = true; m.sim.update(1 / 30); }
+      m.hud.locked = false; c.pitch = 0; c.gas = 0; c.steer = 0;
+      return { ok, inVeh: !!m.sim.player.inVeh, d: Math.hypot(m.sim.player.x - v.x, m.sim.player.z - v.z) };
+    });
+    check(land.ok && !land.inVeh && land.d < 4, `${name} 轻推降落、平稳落地后下机`, log);
+    // 行人密度：先走到市中心（机场附近没有街区，行人不生成），再快进 60 秒；同时记逻辑帧耗时
+    const dens = await page.evaluate(() => {
+      const m = window.__city, s = m.sim, p = s.player;
+      const n = s.world.node(7, 7); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; p.y = s.world.groundY(p.x, p.z);
+      const t0 = performance.now(); m.loop.fastForward(60); const ms = performance.now() - t0;
+      const civ = s.peds.filter((o) => o.kind === 'civ' && o.alive).length;
+      return { civ, msPerTick: ms / (60 * 30) };
+    });
+    check(dens.civ >= 30, `${name} 市中心平民行人 ${dens.civ} 个（原来上限 18，现在 36）`, log);
+    check(dens.msPerTick < 5, `${name} 行人翻倍后逻辑帧耗时 ${dens.msPerTick.toFixed(2)} ms（无明显变差）`, log);
+    check(bad(errors).length === 0, `${name} 新功能流程无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
+    await page.close();
+  }
+}
 await ctx.close();
 console.log(log.join('\n'));
 process.exit(log.some((l) => l.startsWith('FAIL')) ? 1 : 0);

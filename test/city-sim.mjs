@@ -1,7 +1,7 @@
 // 落日湾的纯逻辑测试：不开浏览器，检查各类载具、武器、通缉、任务的规则，并长时间空跑确认不出错。
 // 用法：node test/city-sim.mjs
 import { Sim } from '../city/js/sim.js';
-import { TICK, WEAPON_INDEX } from '../city/js/config.js';
+import { TICK, WEAPON_INDEX, WEAPONS, AMMO, PED } from '../city/js/config.js';
 import { terrainY, RUNWAY } from '../city/js/world.js';
 
 const dt = 1 / TICK;
@@ -181,6 +181,65 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     }
   } catch (e) { err = e.stack || String(e); }
   chk(!err, `随机乱按 240 秒无异常${err ? '：' + err : ''}（最后 ${sim.vehicles.length} 辆车，${sim.peds.length} 个人，${sim.stars} 星）`);
+}
+// ---- 9) 出生全武器、子弹自动补满、直升机、行人密度（2026-11-21） ----
+{
+  // 出生：5 种武器全有，子弹是初始数
+  const sim = new Sim(), p = sim.player;
+  chk(p.owned.every(Boolean) && p.owned.length === 5, '出生就拥有全部 5 种武器');
+  chk(p.ammo[1] === 80 && p.ammo[2] === 150 && p.ammo[3] === 24 && p.ammo[4] === 6, '出生子弹是初始数（手枪 80、冲锋枪 150、霰弹枪 24、火箭筒 6）');
+  for (let i = 0; i < 5; i++) { sim.selectWeapon(i); chk(p.weapon === i, `数字键能直接切到${WEAPONS[i].name}`); }
+  // 读旧存档（只有两把枪）时补齐
+  const old = new Sim({ money: 500, owned: [true, true, false, false, false], ammo: [0, 10, 0, 0, 0], done: [] });
+  chk(old.player.owned.every(Boolean), '读旧存档（只有两把枪）时补齐全部 5 种武器');
+  chk(old.player.ammo[1] === 10 && old.player.ammo[2] === 150 && old.player.ammo[3] === 24 && old.player.ammo[4] === 6, '旧存档已有的手枪保留 10 发，缺的武器按初始数补');
+  // 每种武器打到 0 都自动补满，补满后能继续开火
+  for (let i = 1; i < 5; i++) {
+    const s2 = new Sim(), q = s2.player;
+    q.weapon = i; q.ammo[i] = 1; q.shootCd = 0; s2.ctl.aimYaw = 0;
+    let refilled = false;
+    for (let k = 0; k < TICK && !refilled; k++) { s2.ctl.fire = true; s2.update(dt); if (s2.events.some((e) => e.type === 'refill')) refilled = true; s2.events.length = 0; }
+    s2.ctl.fire = false;
+    chk(refilled && q.ammo[i] === AMMO[i], `${WEAPONS[i].name}打到 0 后自动补满到 ${AMMO[i]} 发（当前 ${q.ammo[i]}）`);
+    q.shootCd = 0; s2.ctl.fire = true; s2.update(dt); s2.ctl.fire = false; s2.events.length = 0;
+    chk(q.ammo[i] === AMMO[i] - 1, `${WEAPONS[i].name}补满后继续开火，子弹又打出去了（剩 ${q.ammo[i]} 发）`);
+  }
+  // 直升机：机场停机坪、上下机、垂直起降、悬停、前飞、转向、降落
+  const heli = sim.vehicles.find((v) => v.type === 'heli');
+  chk(!!heli, '机场停了一架直升机');
+  chk(heli && Math.hypot(heli.x - 1210, heli.z - 760) < 1 && sim.world.groundY(heli.x, heli.z) === 2, `直升机在机场停机坪（${heli.x.toFixed(0)}, ${heli.z.toFixed(0)}，地面高 2 米）`);
+  tp(sim, heli.x + 2.5, heli.z);
+  sim.ctl.enter = true; run(sim, 0.1);
+  chk(p.inVeh === heli, '走到直升机旁按上车键，坐进直升机');
+  run(sim, 3, () => { sim.ctl.pitch = 1; sim.ctl.gas = 0; });
+  chk(heli.flying && heli.y > 25 && Math.abs(heli.speed) < 1, `拉升降杆 3 秒原地升到 ${heli.y.toFixed(0)} 米，水平速度 ${heli.speed.toFixed(1)}（不用跑道）`);
+  const y0 = heli.y;
+  run(sim, 2, () => { sim.ctl.pitch = 0; sim.ctl.gas = 0; sim.ctl.steer = 0; });
+  chk(heli.flying && Math.abs(heli.y - y0) < 1.5, `悬停 2 秒高度变化 ${Math.abs(heli.y - y0).toFixed(1)} 米`);
+  const x0 = heli.x, z0 = heli.z;
+  run(sim, 3, () => { sim.ctl.gas = 1; sim.ctl.pitch = 0; });
+  chk(Math.hypot(heli.x - x0, heli.z - z0) > 20, `油门 3 秒向前飞出 ${Math.hypot(heli.x - x0, heli.z - z0).toFixed(0)} 米`);
+  const yaw0 = heli.yaw;
+  run(sim, 2, () => { sim.ctl.gas = 0.3; sim.ctl.steer = -1; sim.ctl.pitch = 0; });   // 向左转，往跑道方向飞，避开西侧的航站楼和塔台
+  chk(heli.yaw > yaw0 + 0.3, `向左压杆 2 秒，航向左转 ${((heli.yaw - yaw0) * 57.3).toFixed(0)} 度`);
+  run(sim, 10, () => { sim.ctl.pitch = -0.4; sim.ctl.gas = 0; sim.ctl.steer = 0; });
+  chk(!heli.flying && heli.alive, `轻推降落杆后平稳落地（高度 ${heli.y.toFixed(1)} 米）`);
+  sim.ctl.enter = true; run(sim, 0.2);
+  chk(!p.inVeh && Math.hypot(p.x - heli.x, p.z - heli.z) < 4, '降落后下机，站在直升机旁');
+  // 满杆砸下来会坠毁（复用飞机的 -9 米/秒阈值）
+  const s3 = new Sim(), h2 = s3.vehicles.find((v) => v.type === 'heli');
+  tp(s3, h2.x + 2.5, h2.z); s3.ctl.enter = true; run(s3, 0.1);
+  run(s3, 3, () => { s3.ctl.pitch = 1; });
+  run(s3, 6, () => { s3.ctl.pitch = -1; s3.ctl.gas = 0; });
+  chk(!h2.alive && !s3.player.inVeh, '满杆下降触地后直升机坠毁，玩家被甩出');
+  chk(finite(s3), '坠毁后数值仍然合法');
+  // 行人密度：上限 36，空跑后附近平民能达到新目标
+  chk(PED.count === 36, '行人上限是 36（从 18 翻倍）');
+  const s4 = new Sim();
+  run(s4, 60);
+  const civ = s4.peds.filter((o) => o.kind === 'civ' && o.alive).length;
+  chk(civ >= 30, `空跑 60 秒后附近有 ${civ} 个平民行人（目标 36）`);
+  chk(finite(s4), '行人翻倍后数值仍然合法');
 }
 console.log(fail ? `有 ${fail} 项失败` : '落日湾逻辑测试全部通过');
 process.exit(fail ? 1 : 0);

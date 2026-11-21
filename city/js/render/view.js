@@ -14,7 +14,7 @@ const MAX_PED = 48, MAX_SHADOW = 96;
 const _m0 = new THREE.Matrix4(), _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _c = new THREE.Color(), _v = new THREE.Vector3();
 const PICK_COLOR = { cash: 0x4ade80, health: 0xff5a5a, armor: 0x5ab8ff, weapon: 0xffb347, star: 0xffe066 };
 /** 跟车镜头的距离和高度：按载具类别 */
-const CAM = { foot: [6.2, 1.7], car: [9.5, 2.2], bike: [7.5, 1.9], boat: [12, 2.6], tank: [14, 3.6], plane: [18, 3.2] };
+const CAM = { foot: [6.2, 1.7], car: [9.5, 2.2], bike: [7.5, 1.9], boat: [12, 2.6], tank: [14, 3.6], plane: [18, 3.2], heli: [16, 3] };
 
 export class View {
   /**
@@ -299,6 +299,7 @@ export class View {
       g.position.set(x, y, z);
       g.rotation.set(-v.pitch, v.pyaw + (v.yaw - v.pyaw) * alpha, v.roll);
       if (vw.prop) { vw.prop.rotation.z += dt * (v.driver ? 14 + Math.abs(v.speed) * 0.8 : 0); vw.prop.visible = v.alive; }
+      if (vw.rotor) { vw.rotor.rotation.y += dt * (v.driver ? 14 + Math.abs(v.speed) * 0.8 : 0); vw.rotor.visible = v.alive; }
       if (vw.light) vw.light.visible = v.alive && (!v.siren || ((t * 5) | 0) % 2 === 0);
       if (vw.rider) vw.rider.visible = !!v.driver && v.alive;
       if (v.wreck && !vw.dead) { vw.dead = true; vw.body.material = MAT_WRECK; }

@@ -2,7 +2,7 @@
 // 只有规则，没有画面代码，可以脱离浏览器跑（测试用）。画面层每帧读这里的状态，并消费 events 里的事件。
 import { World, terrainY, SIZE, CITY_Y, PITCH, NI, BASE } from './world.js';
 import { Vehicle } from './vehicles.js';
-import { VEH, TRAFFIC_MIX, CAR_COLORS, WEAPONS, WEAPON_INDEX, PLAYER, PED, COP, CRIME, WANTED, TRAFFIC } from './config.js';
+import { VEH, TRAFFIC_MIX, CAR_COLORS, WEAPONS, WEAPON_INDEX, AMMO, PLAYER, PED, COP, CRIME, WANTED, TRAFFIC } from './config.js';
 import { clamp, angDiff } from '../../shared/js/util.js';
 import { Missions } from './missions.js';
 
@@ -17,10 +17,16 @@ export class Sim {
     this.events = [];
     this.vehicles = []; this.peds = []; this.shots = []; this.pickups = [];
     const sp = this.world.places.spawn;
+    // 出生就拥有全部 5 种武器（2026-11-21）：不用拾取或解锁。旧存档只有部分武器时也补齐：
+    // 已有的武器保留存档里的子弹数；缺的武器按初始子弹数补；子弹数为 0 的也按初始数补满。
+    const owned = WEAPONS.map(() => true);
+    const ammo = AMMO.slice();
+    if (save.ammo) for (let i = 1; i < WEAPONS.length; i++) if (save.owned && save.owned[i]) ammo[i] = save.ammo[i] ?? AMMO[i];
+    for (let i = 1; i < WEAPONS.length; i++) if (!(ammo[i] > 0)) ammo[i] = AMMO[i];
     this.player = {
       x: sp.x, z: sp.z, y: this.world.groundY(sp.x, sp.z), yaw: sp.face, px: sp.x, py: 0, pz: sp.z,
       hp: PLAYER.hp, armor: 0, money: save.money ?? 200, inVeh: null, moving: false, swim: false,
-      weapon: 1, owned: save.owned ? save.owned.slice() : [true, true, false, false, false], ammo: save.ammo ? save.ammo.slice() : [Infinity, 80, 0, 0, 0],
+      weapon: 1, owned, ammo,
       shootCd: 0, atkSeq: 0, dead: false, deadT: 0, hitT: 0, godT: 0, speed: 0,
     };
     this.player.ammo[0] = Infinity;
@@ -41,7 +47,7 @@ export class Sim {
 
   /** 生成一辆车 */
   addVehicle(type, x, z, yaw = 0, color) {
-    const v = new Vehicle(this, type, x, z, yaw, color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0xf4f6fa : type === 'tank' ? 0x5c6b48 : type === 'plane' ? 0xe8ecf2 : type === 'boat' ? 0xf0f0f0 : type === 'target' ? 0xc0392b : CAR_COLORS[(Math.random() * CAR_COLORS.length) | 0]));
+    const v = new Vehicle(this, type, x, z, yaw, color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0xf4f6fa : type === 'tank' ? 0x5c6b48 : type === 'plane' ? 0xe8ecf2 : type === 'heli' ? 0xd0362e : type === 'boat' ? 0xf0f0f0 : type === 'target' ? 0xc0392b : CAR_COLORS[(Math.random() * CAR_COLORS.length) | 0]));
     this.vehicles.push(v);
     return v;
   }
@@ -54,6 +60,7 @@ export class Sim {
     keep(this.addVehicle('bike', P.spawn.x - 6.5, P.spawn.z - 6, 0));
     for (const [x, z, yaw] of P.boats) keep(this.addVehicle('boat', x, z, yaw));
     for (const [x, z, yaw] of P.planes) keep(this.addVehicle('plane', x, z, yaw));
+    for (const [x, z, yaw] of P.helis) keep(this.addVehicle('heli', x, z, yaw));   // 机场停机坪的直升机
     for (const [x, z, yaw] of P.tanks) keep(this.addVehicle('tank', x, z, yaw));
     keep(this.addVehicle('tank', P.gate.x + 14, P.gate.z + 4, Math.PI / 2)).free = true;   // 军营门外也停一辆，随便开，不算偷
     this.fixedSpawns.at(-1).free = true;
@@ -186,7 +193,7 @@ export class Sim {
   exitVehicle(force = false) {
     const p = this.player, v = p.inVeh;
     if (!v) return;
-    if (!force && v.flying) { this.toast('先降落再下飞机'); return; }
+    if (!force && v.flying) { this.toast('先降落再下机'); return; }
     v.driver = null; p.inVeh = null;
     // 落脚点：先试驾驶位一侧（左侧），不行换右侧，再不行就原地
     const rx = -Math.cos(v.yaw), rz = Math.sin(v.yaw), d = v.spec.wid / 2 + 0.9, w = this.world;
@@ -269,6 +276,21 @@ export class Sim {
 
   /* ------------------------------------------------------------ 武器 */
 
+  /** 直接切到第 i 种武器（数字键 1~5 用）。出生就全拥有，所以任何一把都能直接切到 */
+  selectWeapon(i) {
+    const p = this.player;
+    if (i < 0 || i >= WEAPONS.length || !p.owned[i]) return;
+    p.weapon = i; this.emit({ type: 'weapon', i });
+  }
+
+  /** 子弹打空时自动补满到该武器的初始子弹数（config.js 的 AMMO），不改武器、不改伤害 */
+  refillWeapon(i) {
+    const p = this.player;
+    p.ammo[i] = AMMO[i];
+    this.emit({ type: 'refill', i });
+    this.toast(`${WEAPONS[i].name}子弹已补满`);
+  }
+
   /** 自动瞄准：优先正在追捕/敌对的人，其次是准星附近的其他目标。返回 { x, z, ped?, veh? } 或 null */
   pickAim(range) {
     const p = this.player, yaw = this.ctl.aimYaw;
@@ -289,10 +311,7 @@ export class Sim {
   playerAttack() {
     const p = this.player, wp = WEAPONS[p.weapon];
     if (p.shootCd > 0) return;
-    if (!wp.melee && p.ammo[p.weapon] <= 0) {     // 没子弹了：自动换成还有弹药的武器，都没有就用拳头
-      let i = 0; for (let k = WEAPONS.length - 1; k > 0; k--) if (p.owned[k] && p.ammo[k] > 0) { i = k; break; }
-      p.weapon = i; this.emit({ type: 'weapon', i }); return;
-    }
+    if (!wp.melee && p.ammo[p.weapon] <= 0) this.refillWeapon(p.weapon);   // 子弹是 0 就先补满再开火（不会换武器）
     p.shootCd = 1 / wp.rate; p.atkSeq++;
     const tg = this.pickAim(wp.melee ? wp.range + 0.6 : wp.range);
     const yaw = tg ? Math.atan2(tg.x - p.x, tg.z - p.z) : (wp.melee ? p.yaw : this.ctl.aimYaw);
@@ -304,6 +323,7 @@ export class Sim {
       return;
     }
     p.ammo[p.weapon]--;
+    if (p.ammo[p.weapon] <= 0) this.refillWeapon(p.weapon);   // 打到 0 的瞬间补满，正在开火的那把能继续开火
     this.noise(p.x, p.z, 45);
     if (wp.explosive) {
       this.shoot({ x: p.x + Math.sin(yaw) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(yaw) * 0.8, dx: Math.sin(yaw), dy: 0.02, dz: Math.cos(yaw), speed: wp.speed, range: wp.range, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: null });

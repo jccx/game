@@ -18,6 +18,7 @@ export class Vehicle {
     this.px = x; this.py = this.y; this.pz = z; this.pyaw = yaw;      // 上一逻辑帧的状态，渲染时插值
     this.pitch = 0; this.roll = 0;
     this.vx = 0; this.vz = 0; this.vy = 0; this.speed = 0;            // speed：沿车头方向的速度（倒车为负）
+    this.air = 0;                                                     // 空中速度：飞机和直升机共用（直升机悬停时为 0）
     this.steer = 0;                                                    // 平滑后的转向输入
     this.hp = this.spec.hp;
     this.radius = Math.max(this.spec.len * 0.4, this.spec.wid * 0.55); // 车与车、车与人碰撞用的圆
@@ -44,7 +45,7 @@ export class Vehicle {
     this.hp -= n;
     if (byPlayer) this.byPlayer = true;
     if (this.hp <= 0 && !this.burning) {
-      this.hp = 0; this.burning = true; this.burnT = this.spec.cls === 'plane' && this.flying ? 0.05 : 2.6;
+      this.hp = 0; this.burning = true; this.burnT = (this.spec.cls === 'plane' || this.spec.cls === 'heli') && this.flying ? 0.05 : 2.6;
       this.sim.emit({ type: 'burn', v: this });
       if (this.driver === 'npc') this.sim.ejectNpc(this, true);
     }
@@ -59,6 +60,7 @@ export class Vehicle {
     const cls = this.spec.cls;
     if (cls === 'boat') this.updateBoat(dt, c);
     else if (cls === 'plane') this.updatePlane(dt, c);
+    else if (cls === 'heli') this.updateHeli(dt, c);
     else this.updateGround(dt, c);
     this.x = clamp(this.x, 15, SIZE - 15); this.z = clamp(this.z, 15, SIZE - 15);
     if (cls === 'tank' && c.fire && this.gunCd <= 0 && !this.burning) {
@@ -157,6 +159,51 @@ export class Vehicle {
     this.y = Math.max(0, terrainY(this.x, this.z) + 0.3) + Math.sin(this.sim.time * 1.7 + this.id) * 0.08;
     this.pitch += (Math.min(0.2, Math.max(0, vf) / s.max * 0.22) - this.pitch) * Math.min(1, dt * 3);     // 加速时船头抬起
     this.roll += (this.steer * Math.min(1, Math.abs(vf) / 10) * 0.35 - this.roll) * Math.min(1, dt * 3);
+  }
+
+  /* ---------------------------------------------------------- 直升机：照飞机的做法，但能垂直起降 */
+  updateHeli(dt, c) {
+    const s = this.spec, w = this.sim.world;
+    if (!this.flying) {
+      // 地面：不用跑道、不用前飞加速，拉升降杆（pitch）就原地升空
+      this.vx *= Math.max(0, 1 - 4 * dt); this.vz *= Math.max(0, 1 - 4 * dt); this.speed = 0;
+      this.y += (w.groundY(this.x, this.z) - this.y) * Math.min(1, dt * 14);
+      this.pitch += (0 - this.pitch) * Math.min(1, dt * 4); this.roll += (0 - this.roll) * Math.min(1, dt * 4);
+      if (c.pitch > 0.15 && !this.burning) { this.flying = true; this.vy = 3; this.air = 0; this.y += 0.3; }
+      return;
+    }
+    // 空中：油门控制前后速度（松油门就悬停），升降杆控制垂直速度，左右压杆转向
+    let v = this.air || 0;
+    const gas = this.burning ? -0.3 : c.gas;
+    if (gas > 0) v += s.accel * gas * dt * (1 - v / s.max * 0.6); else if (gas < 0) v -= s.brake * -gas * dt;
+    else v -= v * 0.8 * dt;                                       // 悬停：松油门后水平速度衰减到 0
+    v = clamp(v, -s.rev, s.max);
+    this.steer += (c.steer - this.steer) * Math.min(1, dt * 3);
+    this.yaw -= this.steer * s.steer * dt;
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    this.vx = fx * v; this.vz = fz * v;
+    this.vy = c.pitch * s.accel;                                  // 垂直速度上限复用 accel（13 米/秒）
+    this.x += this.vx * dt; this.z += this.vz * dt;
+    this.y = Math.min(420, this.y + this.vy * dt);                // 升限复用飞机的 420 米
+    this.air = v; this.speed = v;
+    // 机身随速度前倾、随转向侧倾
+    this.pitch += (clamp(v / s.max, -0.3, 0.3) * 0.8 - this.pitch) * Math.min(1, dt * 3);
+    this.roll += (this.steer * 0.3 - this.roll) * Math.min(1, dt * 3);
+    // 撞楼（复用飞机的判定）
+    P.x = this.x; P.z = this.z;
+    if (w.collide(P, 3, this.y)) { this.x = P.x; this.z = P.z; this.hp = 0; this.burning = true; this.burnT = 0; this.byPlayer = false; this.explode(); return; }
+    // 触地：平稳、落在陆地上就算降落，否则坠毁；落在水里沉没（下降速度和坡度阈值复用飞机）
+    const g = Math.max(w.groundY(this.x, this.z), 0);
+    if (this.y <= g + 0.05) {
+      this.y = g;
+      if (w.inWater(this.x, this.z)) { this.flying = false; this.sink(); return; }
+      const sl = w.slope(this.x, this.z);
+      const ok = this.vy > -9 && Math.abs(sl[0]) + Math.abs(sl[1]) < 0.35;
+      this.flying = false;
+      if (!ok) { this.hp = 0; this.burning = true; this.explode(); return; }
+      this.vy = 0; this.speed = v; this.roll = 0;
+      this.sim.emit({ type: 'crash', x: this.x, z: this.z, f: 3, v: this });
+    }
   }
 
   /* ---------------------------------------------------------- 飞机 */

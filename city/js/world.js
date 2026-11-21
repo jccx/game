@@ -214,6 +214,7 @@ export class World {
       pier: { x0: px - 5, x1: px + 5, z0: GZ0 + 12 * PITCH + ROAD / 2, z1: pz + 16 },
       boats: [[px - 11, pz + 6, 0], [px + 11, pz + 8, 0], [px - 11, pz + 15, 0]],        // 船头朝南（朝海）
       planes: [[RUNWAY.x, RUNWAY.z1 - 14, Math.PI], [AIRPORT[2] - 76, AIRPORT[1] + 40, -Math.PI / 2]],
+      helis: [[1210, 760, 0]],          // 机场停机坪：跑道西侧空地（地面平坦，无建筑），不用跑道就能原地起飞
       tanks: [[BASE[2] - 60, BASE[1] + 80, Math.PI], [BASE[2] - 46, BASE[1] + 80, Math.PI]],
       gate: { x: (BASE[0] + BASE[2]) / 2, z: BASE[3] + 6 },
     };

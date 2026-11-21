@@ -103,6 +103,8 @@ export class Hud {
     if (k.hit('KeyM')) this.overlay ? this.closeOverlay() : this.openMap();
     if (k.hit('Escape')) this.overlay ? this.closeOverlay() : this.openSettings();
     if (!v) {
+      // 步行：数字键 1~5 直接切到任意一种武器（出生就全拥有，不用解锁）
+      for (let i = 0; i < WEAPONS.length; i++) if (k.hit('Digit' + (i + 1))) sim.selectWeapon(i);
       // 步行：摇杆方向是相对镜头的。镜头朝向 (sin, cos)，屏幕右方是 (-cos, sin)
       const fx = Math.sin(cy), fz = Math.cos(cy);
       c.mx = fx * -jy - fz * jx; c.mz = fz * -jy + fx * jx;
@@ -111,13 +113,14 @@ export class Hud {
       return;
     }
     c.mx = 0; c.mz = 0;
-    const plane = v.spec.cls === 'plane';
+    const plane = v.spec.cls === 'plane', heli = v.spec.cls === 'heli';
     c.steer = clamp(jx * 1.25, -1, 1);
     let gas = this.bGas.pressed ? 1 : this.bBrake.pressed ? -1 : 0;
-    if (plane) {
+    if (plane || heli) {
+      // 飞机和直升机共用一套：WS 油门，方向键上下 / 摇杆上下是俯仰（飞机）或升降（直升机）
       if (k.isDown('KeyW')) gas = 1; else if (k.isDown('KeyS')) gas = -1;
       const kp = (k.isDown('ArrowUp') ? 1 : 0) - (k.isDown('ArrowDown') ? 1 : 0);
-      // 触屏上摇杆上下就是俯仰；键盘上 WS 留给油门，俯仰用方向键
+      // 触屏上摇杆上下就是俯仰/升降；键盘上 WS 留给油门，俯仰/升降用方向键
       c.pitch = kp || (this.joy.active ? clamp(-jy * 1.2, -1, 1) : 0);
       if (ka.active && !kp) c.steer = (k.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (k.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
     } else {
@@ -143,7 +146,8 @@ export class Hud {
       case 'stars': if (ev.up) { Sfx.play('siren'); if (ev.n === 1) this.showBanner('被通缉了', '甩掉警察的视线一阵子，星星就会消失', 'bad', 3); } else if (ev.n === 0) this.showBanner('通缉解除', '', 'good', 2); break;
       case 'wasted': Sfx.play('lose'); break;
       case 'respawn': toast(ev.fee ? `医药费 $${ev.fee}` : '你在医院醒来', 2500); break;
-      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹' : ''}`, ev.v.spec.cls === 'plane' ? 4500 : 2200); break;
+      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆上下升降、油门前进，不用跑道就能原地起飞；降落要轻推，别满杆砸下来' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
+      case 'refill': { this.wpEl.classList.remove('flash'); void this.wpEl.offsetWidth; this.wpEl.classList.add('flash'); setTimeout(() => this.wpEl.classList.remove('flash'), 700); break; }
       case 'hurt': Sfx.play('hurt', 0.25); this.root.classList.add('hurt'); clearTimeout(this._ht); this._ht = setTimeout(() => this.root.classList.remove('hurt'), 160); break;
       case 'mission':
         if (ev.what === 'start') { Sfx.play('go'); this.showBanner(ev.name, ev.desc, 'info', 5); }
@@ -194,7 +198,7 @@ export class Hud {
       this.bAtk.show(foot); this.bSwap.show(foot);
       this.bGas.show(!foot); this.bBrake.show(!foot); this.bExit.show(!foot);
       this.bHand.show(!foot && (cls === 'car' || cls === 'bike')); this.bFire.show(cls === 'tank');
-      this.bBrake.setLabel(cls === 'plane' ? '减速' : cls === 'boat' ? '倒船' : '刹车');
+      this.bBrake.setLabel(cls === 'plane' || cls === 'heli' ? '减速' : cls === 'boat' ? '倒船' : '刹车');
     });
     set('atkIcon', p.weapon > 0, (x) => this.bAtk.setIcon(x ? IC.gun : IC.fist));
     const near = !v && !p.dead ? sim.nearestVehicle() : null;
@@ -284,7 +288,7 @@ export class Hud {
     el('button', { cls: 'g-b ghost', text: '全屏', on: { click: () => toggleFullscreen() } }, f);
     el('button', { cls: 'g-b ghost', text: '清除存档重来', on: { click: () => { store.set('city-save', null); this.closeOverlay(); this.api.restart(); } } }, f);
     el('a', { cls: 'g-b ghost', text: '返回大厅', attrs: { href: '../' } }, f);
-    el('div', { cls: 'set-tip', text: '操作：左下摇杆移动或转向，右半边屏幕拖动转镜头。开车时摇杆上下也能当油门和刹车。电脑键位：WASD、鼠标拖动转镜头、空格 攻击/手刹、F 上下车、Q 换武器、J 开炮、方向键上下 飞机俯仰、M 地图。金钱和已完成的任务会自动保存在本机。' }, box);
+    el('div', { cls: 'set-tip', text: '操作：左下摇杆移动或转向，右半边屏幕拖动转镜头。开车时摇杆上下也能当油门和刹车。出生就带全部 5 种武器，数字键 1~5 或 Q 换武器，子弹打空自动补满。直升机在机场停机坪：摇杆上下升降、油门前进，不用跑道。电脑键位：WASD、鼠标拖动转镜头、空格 攻击/手刹、F 上下车、Q 换武器、J 开炮、方向键上下 飞机俯仰/直升机升降、M 地图。金钱和已完成的任务会自动保存在本机。' }, box);
   }
 
   dispose() { if (this.engine) this.engine.stop(); store.set('city-save', this.sim.save()); this.root.innerHTML = ''; }
