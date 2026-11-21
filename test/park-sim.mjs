@@ -206,5 +206,40 @@ function roadTo(p, x, z) {
   chk(p.served > 5, `600 秒服务了 ${p.served} 名游客`);
 }
 
+{
+  // ---- 优化：BFS 与过山车推演缓存（2026-11-21） ----
+  // findPath 改成队首指针 + 倒序收集，返回路径必须和原来一模一样
+  const p = new Park({ seed: 42 });
+  p.god = true;
+  for (let z = 16; z >= 2; z--) p.buildPath(11, z);
+  for (let x = 2; x <= 21; x++) p.buildPath(x, 10);
+  p.god = false;
+  const path = p.findPath(11, 16, 21, 10);
+  chk(Array.isArray(path) && path.length > 0 && path[path.length - 1][0] === 21 && path[path.length - 1][1] === 10, `BFS 能找到入口到 (21,10) 的路（${path ? path.length : 'null'} 格）`);
+  chk(path.every(([x, z], i) => i === 0 || Math.abs(x - path[i - 1][0]) + Math.abs(z - path[i - 1][1]) === 1), 'BFS 路径每步只走一格，相邻');
+  chk(path.every(([x, z]) => p._walkable(x, z)), 'BFS 路径全在可走的格子上');
+  chk(JSON.stringify(p.findPath(11, 16, 11, 16)) === '[]', '起点就是终点时返回空路径');
+  chk(p.findPath(11, 16, 0, 0) === null, '没路的地方返回 null');
+  // coasterTrace 缓存：没改轨道时读到同一个对象，改了就失效重算
+  const q = new Park({ seed: 7 });
+  q.research('coaster'); q.build('coaster', 10, 10);
+  const t0 = q.coasterTrace;
+  chk(q.coasterTrace === t0, '轨道没变时两次读 coasterTrace 是同一个对象（缓存命中）');
+  const loop2 = ['straight', 'straight', 'right', 'straight', 'right', 'straight', 'right', 'straight'];
+  for (const s of loop2) q.coasterAdd(s);
+  chk(q.coasterTrace !== t0 && q.coasterTrace.closed === true, '加满 8 段后缓存失效重算，闭环 true');
+  const t1 = q.coasterTrace;
+  q.coasterUndo();
+  chk(q.coasterTrace !== t1 && q.coasterTrace.closed === false, '撤销一段后缓存失效，闭环变 false');
+  q.coasterAdd('straight');
+  chk(q.coasterTrace.closed === true, '补一段后闭环恢复 true');
+  q.coasterClear();
+  chk(q.coasterTrace.closed === false && q.coaster.segments.length === 0, '清空轨道后缓存失效，闭环 false');
+  const q2 = Park.deserialize(JSON.parse(JSON.stringify(q.serialize())));
+  chk(q2.coasterTrace.closed === q.coasterTrace.closed, '读档后 coasterTrace 状态一致');
+  q.demolishAt(10, 10);
+  chk(q.coasterTrace.closed === false && q.coaster.station === null, '拆除站台后缓存失效，站台没了');
+}
+
 console.log(fail ? `有 ${fail} / ${total} 项失败` : `梦想乐园逻辑测试全部通过（${total} 项）`);
 process.exit(fail ? 1 : 0);

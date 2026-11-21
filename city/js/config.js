@@ -22,7 +22,7 @@ export const VEH = {
   boat:   { cls: 'boat', name: '快艇', len: 6.5, wid: 2.4, hgt: 1.4, hp: 400, max: 30, rev: 6, accel: 9, brake: 4, steer: 1.5, grip: 1.6, mass: 1 },
   plane:  { cls: 'plane', name: '螺旋桨飞机', len: 8, wid: 10, hgt: 2.6, hp: 300, max: 78, rev: 0, accel: 13, brake: 14, steer: 1.1, grip: 5, takeoff: 30, stall: 24, mass: 1 },
   heli:   { cls: 'heli', name: '直升机', len: 7.5, wid: 2.6, hgt: 2.8, hp: 300, max: 78, rev: 9, accel: 13, brake: 14, steer: 1.1, grip: 5, mass: 1 },
-  tank:   { cls: 'tank', name: '坦克', len: 7, wid: 3.6, hgt: 2.6, hp: 4000, max: 15, rev: 7, accel: 7, brake: 20, steer: 1.2, grip: 12, mass: 20, reload: 1.4 },
+  tank:   { cls: 'tank', name: '坦克', len: 7, wid: 3.6, hgt: 2.6, hp: 4000, max: 15, rev: 7, accel: 7, brake: 20, steer: 1.2, grip: 12, mass: 20, reload: 0.1 },   // 坦克炮间隔 0.1 秒，和冲锋枪一样（2026-11-21，原来是 1.4 秒）
 };
 
 /** 路上随机出现的车型和比例 */
@@ -34,13 +34,15 @@ export const CAR_COLORS = [0xd94b3d, 0x3b78d8, 0xe8e8e8, 0x2f3540, 0x3fae6a, 0xe
 /**
  * 武器。melee 近战；dmg 单发伤害；rate 每秒发数；range 射程；spread 散布（弧度）；pellets 一次打出的弹丸数；
  * explosive 是否爆炸物（radius 爆炸半径、speed 飞行速度）。
+ * 射速统一 10 发/秒（2026-11-21：原来拳头 2.2、手枪 3.2、霰弹枪 1.3、火箭筒 0.55，全部改成和冲锋枪一样）；
+ * 伤害、射程、爆炸半径、速度、弹药数都不动。
  */
 export const WEAPONS = [
-  { id: 'fist',    name: '拳头',   melee: true, dmg: 14, rate: 2.2, range: 2.0 },
-  { id: 'pistol',  name: '手枪',   dmg: 22, rate: 3.2, range: 55, spread: 0.02 },
+  { id: 'fist',    name: '拳头',   melee: true, dmg: 14, rate: 10, range: 2.0 },
+  { id: 'pistol',  name: '手枪',   dmg: 22, rate: 10, range: 55, spread: 0.02 },
   { id: 'smg',     name: '冲锋枪', dmg: 13, rate: 10, range: 50, spread: 0.05 },
-  { id: 'shotgun', name: '霰弹枪', dmg: 11, pellets: 7, rate: 1.3, range: 24, spread: 0.11 },
-  { id: 'rocket',  name: '火箭筒', dmg: 320, rate: 0.55, range: 130, explosive: true, radius: 7, speed: 55 },
+  { id: 'shotgun', name: '霰弹枪', dmg: 11, pellets: 7, rate: 10, range: 24, spread: 0.11 },
+  { id: 'rocket',  name: '火箭筒', dmg: 320, rate: 10, range: 130, explosive: true, radius: 7, speed: 55 },
 ];
 export const WEAPON_INDEX = Object.fromEntries(WEAPONS.map((w, i) => [w.id, i]));
 

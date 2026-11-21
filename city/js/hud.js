@@ -39,7 +39,7 @@ export class Hud {
     this.mapImg = paintMap(sim.world, 512);
     root.innerHTML = '';
     this.build();
-    setTimeout(() => this.showBanner('欢迎来到落日湾', '走进黄色光柱接任务，或者随便找辆车兜风', 'info', 5), 600);
+    setTimeout(() => this.showBanner('欢迎来到落日湾', '市中心有 8 栋世界地标，走近了会报名字；走进黄色光柱接任务，或者随便找辆车兜风', 'info', 5), 600);
   }
 
   build() {
@@ -117,12 +117,23 @@ export class Hud {
     const plane = v.spec.cls === 'plane', heli = v.spec.cls === 'heli';
     c.steer = clamp(jx * 1.25, -1, 1);
     let gas = this.bGas.pressed ? 1 : this.bBrake.pressed ? -1 : 0;
-    if (plane || heli) {
-      // 飞机和直升机共用一套：WS 油门，方向键上下 / 摇杆上下是俯仰（飞机）或升降（直升机）
+    if (plane) {
+      // 飞机：WS 油门，方向键上下 / 摇杆上下是俯仰
       if (k.isDown('KeyW')) gas = 1; else if (k.isDown('KeyS')) gas = -1;
       const kp = (k.isDown('ArrowUp') ? 1 : 0) - (k.isDown('ArrowDown') ? 1 : 0);
-      // 触屏上摇杆上下就是俯仰/升降；键盘上 WS 留给油门，俯仰/升降用方向键
+      // 触屏上摇杆上下就是俯仰；键盘上 WS 留给油门，俯仰用方向键
       c.pitch = kp || (this.joy.active ? clamp(-jy * 1.2, -1, 1) : 0);
+      if (ka.active && !kp) c.steer = (k.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (k.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
+    } else if (heli) {
+      // 直升机：摇杆管水平（上下前进/后退、左右转向），升降改两个按钮（油门键变“上升”、刹车键变“下降”，见 slow() 里的改名）
+      // 键盘本来就是这套：W/S 前进后退、A/D 转向、方向键上下升降，不用改
+      if (this.joy.active) gas = clamp(-jy * 1.3, -1, 1);   // 摇杆上推前进、下拉后退；松开就悬停（vehicles.js 里松油门水平速度衰减到 0）
+      else if (k.isDown('KeyW')) gas = 1; else if (k.isDown('KeyS')) gas = -1;
+      else gas = 0;
+      const kp = (k.isDown('ArrowUp') ? 1 : 0) - (k.isDown('ArrowDown') ? 1 : 0);
+      // 按钮是二值的（只有按住/松开），给固定 0.6 档：垂直速度 7.8 米/秒，在坠毁阈值 9 米/秒以内，按住“下降”能直接平稳落地；
+      // 满杆（1.0，13 米/秒）落地会坠毁，摇杆时代靠轻推控制，按钮时代没法轻推，所以按钮不用满杆。键盘方向键保持满杆 ±1 不变。
+      c.pitch = kp || (this.bGas.pressed ? 0.6 : this.bBrake.pressed ? -0.6 : 0);   // 两个按钮都不按，垂直速度就是 0
       if (ka.active && !kp) c.steer = (k.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (k.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
     } else {
       c.pitch = 0;
@@ -148,8 +159,15 @@ export class Hud {
       }
       case 'stars': if (ev.up) { Sfx.play('siren'); if (ev.n === 1) this.showBanner('被通缉了', '甩掉警察的视线一阵子，星星就会消失', 'bad', 3); } else if (ev.n === 0) this.showBanner('通缉解除', '', 'good', 2); break;
       case 'wasted': Sfx.play('lose'); break;
+      case 'buildingDown': {
+        const b = ev.b, k = this.mapImg.width / SIZE;
+        this.mapImg.getContext('2d').fillStyle = '#3a3632';   // 小地图上也不再是楼，只剩废墟色
+        this.mapImg.getContext('2d').fillRect(b.x0 * k, b.z0 * k, (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+        toast(`${b.name || '建筑'}被炸平了`);
+        break;
+      }
       case 'respawn': toast(ev.fee ? `医药费 $${ev.fee}` : '你在医院醒来', 2500); break;
-      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆上下升降、油门前进，不用跑道就能原地起飞；轻推慢降能落平顶楼顶，J 键或“火箭”键发火箭筒' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹，J 键发火箭筒' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
+      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆前后左右飞，“上升/下降”按钮升降，不用跑道就能原地起飞；轻推慢降能落平顶楼顶，J 键或“火箭”键发火箭筒' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹，J 键发火箭筒' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
       case 'refill': { this.wpEl.classList.remove('flash'); void this.wpEl.offsetWidth; this.wpEl.classList.add('flash'); setTimeout(() => this.wpEl.classList.remove('flash'), 700); break; }
       case 'hurt': Sfx.play('hurt', 0.25); this.root.classList.add('hurt'); clearTimeout(this._ht); this._ht = setTimeout(() => this.root.classList.remove('hurt'), 160); break;
       case 'mission':
@@ -194,6 +212,17 @@ export class Hud {
     set('wp', wp.name + (wp.melee ? '' : ' ' + p.ammo[p.weapon]), (x) => { this.wpEl.textContent = x; });
     set('god', p.godT > 0, (x) => this.cheat.sync(x));
     set('dead', p.dead, (x) => { this.wasted.classList.toggle('show', x); });
+    // 走近地标时报名字（每栋一局只报一次）
+    if (!v) {
+      if (!this._lmSeen) this._lmSeen = new Set();
+      let best = null, bd = 70;
+      for (const b of sim.world.buildings) {
+        if (b.kind !== 'landmark' || b.destroyed || this._lmSeen.has(b)) continue;
+        const d = Math.hypot((b.x0 + b.x1) / 2 - p.x, (b.z0 + b.z1) / 2 - p.z);
+        if (d < bd) { bd = d; best = b; }
+      }
+      if (best) { this._lmSeen.add(best); toast(`${best.name}${best.note ? '：' + best.note : ''}`); }
+    }
     // 按钮：步行和开车两套
     const cls = v ? v.spec.cls : '';
     set('mode', cls, () => {
@@ -201,7 +230,8 @@ export class Hud {
       this.bAtk.show(foot); this.bSwap.show(foot);
       this.bGas.show(!foot); this.bBrake.show(!foot); this.bExit.show(!foot);
       this.bHand.show(!foot && (cls === 'car' || cls === 'bike')); this.bFire.show(!foot); this.bFire.setLabel(cls === 'tank' ? '开炮' : '火箭');   // 开炮键只在坦克上是开炮，其他车上是火箭筒
-      this.bBrake.setLabel(cls === 'plane' || cls === 'heli' ? '减速' : cls === 'boat' ? '倒船' : '刹车');
+      this.bGas.setLabel(cls === 'heli' ? '上升' : '油门');   // 直升机上油门键改名“上升”，管升降；其他车上还是油门
+      this.bBrake.setLabel(cls === 'heli' ? '下降' : cls === 'plane' ? '减速' : cls === 'boat' ? '倒船' : '刹车');   // 直升机上刹车键改名“下降”
     });
     set('atkIcon', p.weapon > 0, (x) => this.bAtk.setIcon(x ? IC.gun : IC.fist));
     const near = !v && !p.dead ? sim.nearestVehicle() : null;
@@ -273,6 +303,7 @@ export class Hud {
     tag(RUNWAY.x - 70, (RUNWAY.z0 + RUNWAY.z1) / 2, '机场', '#cfd6e0'); tag((BASE[0] + BASE[2]) / 2, (BASE[1] + BASE[3]) / 2, '军营', '#b9c49a');
     tag(P.pier.x0 + 5, P.pier.z1 + 26, '码头', '#d9b98a'); tag(P.hospital.x, P.hospital.z - 22, '医院', '#ffb0b0'); tag(430, 430, '山', '#e8e8e8');
     for (const m of sim.missions.list) tag(m.at[0], m.at[1], m.icon + (sim.missions.done.has(m.id) ? '✓' : ''), sim.missions.done.has(m.id) ? '#b0a060' : '#ffd84a');
+    for (const b of sim.world.buildings) if (b.kind === 'landmark') tag((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, b.destroyed ? b.name + '（已炸平）' : b.name, b.destroyed ? '#8a8578' : '#d8a020');
     x.translate(p.x * k, p.z * k); x.rotate(-p.yaw + Math.PI);
     x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, -12); x.lineTo(9, 10); x.lineTo(0, 5); x.lineTo(-9, 10); x.closePath(); x.fill(); x.stroke();
     const list = el('div', { cls: 'mlist g-scroll' }, body);

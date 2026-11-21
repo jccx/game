@@ -349,12 +349,13 @@ export class View {
       const [nx, nz] = tileToWorld(nxt[0], nxt[1]);
       this.coasterCar.rotation.y = Math.atan2(nx - wx, nz - wz);
     }
-    // 游客小人
+    // 游客小人（每帧 60 人：坐标换算直接内联算术，不调 tileToWorld，省掉每人两次小数组分配）
     const vs = park.visitors;
     let n = 0;
     for (const v of vs) {
       if (n >= 60) break;
-      const [wx, wz] = tileToWorld(v.x - 0.5, v.z - 0.5);
+      // 等价于 tileToWorld(v.x - 0.5, v.z - 0.5)：(v.x - W/2) * TILE，(v.z - D/2) * TILE
+      const wx = (v.x - W / 2) * TILE, wz = (v.z - D / 2) * TILE;
       this._dummy.position.set(wx, 0.75 + Math.abs(Math.sin(this.time * 6 + v.id)) * 0.06, wz);
       this._dummy.scale.set(1, 1.3, 1);
       this._dummy.rotation.set(0, 0, 0);

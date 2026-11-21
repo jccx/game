@@ -61,6 +61,97 @@ function tree(b, x, y, z, s, rnd) {
   }
 }
 
+/** 被炸平的建筑：只剩一层低矮的深色废墟平板和几块碎块（ch.b 是所在 320 米地块的 Builder） */
+function rubble(ch, bd, cx, cz) {
+  const w = bd.x1 - bd.x0, d = bd.z1 - bd.z0;
+  ch.b.box(w, 0.9, d, 0x4a4642, cx, bd.y0 + 0.45, cz);
+  ch.b.box(w * 0.3, 1.4, d * 0.3, 0x5a5348, cx - w * 0.2, bd.y0 + 0.7, cz + d * 0.15, 0, 0.4, 0);
+  ch.b.box(w * 0.25, 1.0, d * 0.25, 0x3a3632, cx + w * 0.25, bd.y0 + 0.5, cz - d * 0.2, 0, -0.3, 0);
+}
+
+/**
+ * 世界地标：每栋按名字拼出能一眼认出来的轮廓（方块、圆柱、棱锥组合，不用图片/模型文件）。
+ * y0 是地面高度，bd.h 是楼体高度（天线不算在 h 里：西尔斯大厦 h 130，天线画到 145）。
+ */
+function landmark(ch, bd, cx, cz) {
+  const b = ch.b, y0 = bd.y0;
+  switch (bd.name) {
+    case '埃菲尔铁塔': {
+      const iron = [0x3a2e22, 0x5a4632];
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]])   // 四条腿向内收，顶端收进一层平台下面
+        b.box(3, 54, 3, iron, cx + sx * 12, y0 + 27, cz + sz * 12, -sz * 0.14, 0, sx * 0.14);
+      b.box(24, 16, 24, iron, cx, y0 + 60, cz);       // 一层平台 52~68
+      b.box(16, 16, 16, iron, cx, y0 + 76, cz);       // 二层 68~84
+      b.box(10, 14, 10, iron, cx, y0 + 91, cz);       // 三层 84~98
+      b.cone(4, 22, 0x3a2e22, cx, y0 + 109, cz);       // 尖顶 98~120
+      break;
+    }
+    case '帝国大厦': {
+      const stone = [0xb59f78, 0xd8c9a3];
+      b.box(28, 30, 28, stone, cx, y0 + 15, cz);      // 底座 0~30
+      b.box(22, 24, 22, stone, cx, y0 + 42, cz);      // 30~54
+      b.box(16, 20, 16, stone, cx, y0 + 64, cz);      // 54~74
+      b.box(10, 13, 10, stone, cx, y0 + 80.5, cz);    // 74~87
+      b.cyl(1.5, 1.5, 8, 0x8a8f98, cx, y0 + 91, cz);   // 尖顶 87~95
+      break;
+    }
+    case '哈利法塔': {
+      const glass = [0x7e9ab5, 0xb8cce0];
+      b.box(30, 40, 30, glass, cx, y0 + 20, cz);      // 多级收窄的针形塔
+      b.box(24, 30, 24, glass, cx, y0 + 55, cz);      // 40~70
+      b.box(18, 25, 18, glass, cx, y0 + 82.5, cz);    // 70~95
+      b.box(13, 20, 13, glass, cx, y0 + 105, cz);     // 95~115
+      b.box(9, 15, 9, glass, cx, y0 + 122.5, cz);     // 115~130
+      b.box(5, 12, 5, glass, cx, y0 + 136, cz);       // 130~142
+      b.cyl(1, 1, 8, 0x8a8f98, cx, y0 + 146, cz);      // 针尖 142~150
+      break;
+    }
+    case '悉尼歌剧院': {
+      b.box(44, 6, 26, [0x8a7a5c, 0xb09a72], cx, y0 + 3, cz);   // 低矮宽阔的基座
+      for (const dx of [-13, 0, 13]) b.sphere(8.5, 0xf0ede4, cx + dx, y0 + 5, cz, 1, 1.5, 1, 10);   // 三片白色贝壳，顶约 18 米
+      for (const dx of [-6.5, 6.5]) b.sphere(5, 0xf0ede4, cx + dx, y0 + 4, cz - 8, 1, 1.4, 1, 8);    // 后排两片小贝壳
+      break;
+    }
+    case '比萨斜塔': {
+      const marble = [0xd8cdb2, 0xefe8d2];
+      // 塔身倾斜约 6 度（rz 0.1 时顶端向 -x 偏约 2.6 米），环形挑檐跟着同一方向错开
+      b.cyl(5, 5.4, 26, marble, cx, y0 + 13, cz, 0, 0, 0.1, 12);
+      for (const [dy, off] of [[7, -0.7], [14, -1.4], [21, -2.1]]) b.cyl(6, 6, 1.2, 0xc8bda0, cx + off, y0 + dy, cz, 0, 0, 0.1, 12);
+      b.cyl(5.5, 5.5, 3, marble, cx - 2.6, y0 + 27.5, cz, 0, 0, 0.1, 12);
+      break;
+    }
+    case '大本钟': {
+      const stone = [0x9a8a6c, 0xc0b090];
+      b.box(12, 45, 12, stone, cx, y0 + 22.5, cz);    // 方形钟楼
+      for (const [dx, dz] of [[0, 6.1], [0, -6.1], [6.1, 0], [-6.1, 0]])   // 四面钟面
+        b.box(dx === 0 ? 8 : 0.4, 8, dz === 0 ? 8 : 0.4, 0xf0ead8, cx + dx, y0 + 38, cz + dz);
+      b.cone(8.5, 10, 0x2e5a44, cx, y0 + 50, cz, 0, Math.PI / 4, 0, 4);   // 四棱锥尖顶 45~55
+      break;
+    }
+    case '西尔斯大厦（威利斯大厦）': {
+      const glass = [0x22262e, 0x3d4a5e];
+      const H = [[95, 110, 95], [110, 130, 110], [95, 110, 95]];   // 九个方形筒体捆在一起，中间最高
+      for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) {
+        const h = H[a][c];
+        b.box(10.5, h, 10.5, glass, cx + (a - 1) * 11, y0 + h / 2, cz + (c - 1) * 11);
+      }
+      b.cyl(0.35, 0.35, 15, 0x8a8f98, cx - 3, y0 + 137.5, cz, 0, 0, 0, 6);   // 两根天线 130~145
+      b.cyl(0.35, 0.35, 15, 0x8a8f98, cx + 3, y0 + 137.5, cz, 0, 0, 0, 6);
+      break;
+    }
+    case '特朗普大厦': {
+      const glass = [0x5f7a92, 0x9db4c8];
+      b.box(26, 45, 26, glass, cx, y0 + 22.5, cz);    // 三段阶梯收窄
+      b.box(26, 1, 26, 0xb8c8d8, cx, y0 + 45, cz);     // 收窄处的浅色腰线
+      b.box(20, 28, 20, glass, cx, y0 + 59, cz);      // 45~73
+      b.box(20, 1, 20, 0xb8c8d8, cx, y0 + 73, cz);
+      b.box(14, 25, 14, glass, cx, y0 + 85.5, cz);    // 73~98
+      break;
+    }
+    default: break;
+  }
+}
+
 /** 斜屋顶：一个三角柱的几何体（宽 1、高 1、深 1，屋脊沿 z） */
 let _prism = null;
 function prism() {
@@ -165,13 +256,23 @@ export function buildScene(world, scene, hiRes) {
     const cx = (bl.x0 + bl.x1) / 2, cz = (bl.z0 + bl.z1) / 2;
     at(cx, cz).b.box(bl.x1 - bl.x0, CURB + 0.1, bl.z1 - bl.z0, ZONE_COLOR[bl.zone], cx, CITY_Y + CURB / 2 - 0.05, cz);
   }
-  // 机场停机坪和跑道、军营地面、栈桥
-  const ap = at((AIRPORT[0] + AIRPORT[2]) / 2, (AIRPORT[1] + AIRPORT[3]) / 2).b;
-  ap.box(AIRPORT[2] - AIRPORT[0], 0.1, AIRPORT[3] - AIRPORT[1], 0x9a9ea6, (AIRPORT[0] + AIRPORT[2]) / 2, CITY_Y - 0.02, (AIRPORT[1] + AIRPORT[3]) / 2);
-  ap.box(RUNWAY.w, 0.1, RUNWAY.z1 - RUNWAY.z0, 0x3a3d44, RUNWAY.x, CITY_Y + 0.01, (RUNWAY.z0 + RUNWAY.z1) / 2);
-  for (let z = RUNWAY.z0 + 20; z < RUNWAY.z1 - 20; z += 24) ap.box(0.8, 0.1, 10, 0xf0f0f0, RUNWAY.x, CITY_Y + 0.03, z);
-  for (const z of [RUNWAY.z0 + 6, RUNWAY.z1 - 6]) for (let k = -4; k <= 4; k++) ap.box(1.6, 0.1, 8, 0xf0f0f0, RUNWAY.x + k * 3, CITY_Y + 0.03, z);
-  at((BASE[0] + BASE[2]) / 2, (BASE[1] + BASE[3]) / 2).b.box(BASE[2] - BASE[0], 0.1, BASE[3] - BASE[1], 0x8a8f78, (BASE[0] + BASE[2]) / 2, CITY_Y - 0.02, (BASE[1] + BASE[3]) / 2);
+  // 机场停机坪、跑道、军营地面：单独成网，用 polygonOffset 按层拉开深度。
+  // 原来它们是和建筑一起合进地块网格的薄盒子，顶面和道路完全共面（都是 y=2.03，
+  // 跑道只比停机坪高 0.03 米、虚线只比跑道高 0.02 米），深度缓冲打成平手，
+  // 镜头稍一动每像素的胜负就翻转，机场西缘那条 7 米宽的重叠带在“路 / 停机坪”之间闪烁。
+  // polygonOffset 在深度值上把各层拉开至少一个深度单位（远处、掠射角都有效），
+  // 高度、颜色、位置一个都不动，所以地面高度、碰撞、跑道降落、停机坪都不受影响。
+  // 层级（数字越小越靠前）：道路/地形 0，停机坪和军营地面 -1，跑道 -2，跑道虚线 -3；
+  // 上层必须比下层更靠前，否则会被下层盖住（比如只给跑道加偏移会把虚线盖掉）。
+  const slabMat = (off) => { const m = MAT.vcFlat.clone(); m.polygonOffset = true; m.polygonOffsetFactor = off; m.polygonOffsetUnits = off; return m; };
+  const slabMesh = (b, off) => { const m = b.mesh(slabMat(off), true); m.matrixAutoUpdate = false; group.add(m); disposables.push(m.geometry, m.material); };
+  const groundB = new Builder(), runwayB = new Builder(), dashB = new Builder();
+  groundB.box(AIRPORT[2] - AIRPORT[0], 0.1, AIRPORT[3] - AIRPORT[1], 0x9a9ea6, (AIRPORT[0] + AIRPORT[2]) / 2, CITY_Y - 0.02, (AIRPORT[1] + AIRPORT[3]) / 2);
+  groundB.box(BASE[2] - BASE[0], 0.1, BASE[3] - BASE[1], 0x8a8f78, (BASE[0] + BASE[2]) / 2, CITY_Y - 0.02, (BASE[1] + BASE[3]) / 2);
+  runwayB.box(RUNWAY.w, 0.1, RUNWAY.z1 - RUNWAY.z0, 0x3a3d44, RUNWAY.x, CITY_Y + 0.01, (RUNWAY.z0 + RUNWAY.z1) / 2);
+  for (let z = RUNWAY.z0 + 20; z < RUNWAY.z1 - 20; z += 24) dashB.box(0.8, 0.1, 10, 0xf0f0f0, RUNWAY.x, CITY_Y + 0.03, z);
+  for (const z of [RUNWAY.z0 + 6, RUNWAY.z1 - 6]) for (let k = -4; k <= 4; k++) dashB.box(1.6, 0.1, 8, 0xf0f0f0, RUNWAY.x + k * 3, CITY_Y + 0.03, z);
+  slabMesh(groundB, -1); slabMesh(runwayB, -2); slabMesh(dashB, -3);
   const pr = world.places.pier, pb = at((pr.x0 + pr.x1) / 2, pr.z1).b;
   pb.box(pr.x1 - pr.x0, 0.5, pr.z1 - pr.z0, [0x6b4f34, 0x9a7650], (pr.x0 + pr.x1) / 2, CITY_Y - 0.25, (pr.z0 + pr.z1) / 2);
   for (let z = pr.z0 + 6; z < pr.z1; z += 12) for (const x of [pr.x0 + 0.5, pr.x1 - 0.5]) pb.cyl(0.35, 0.35, 7, 0x5a4028, x, CITY_Y - 3.6, z, 0, 0, 0, 6);
@@ -187,6 +288,8 @@ export function buildScene(world, scene, hiRes) {
   };
   for (const bd of world.buildings) {
     const cx = (bd.x0 + bd.x1) / 2, cz = (bd.z0 + bd.z1) / 2, w = bd.x1 - bd.x0, d = bd.z1 - bd.z0, ch = at(cx, cz), y0 = bd.y0, y1 = bd.y0 + bd.h;
+    if (bd.destroyed) { rubble(ch, bd, cx, cz); continue; }   // 被炸平了：只剩一层低矮的废墟
+    if (bd.kind === 'landmark') { landmark(ch, bd, cx, cz); continue; }
     if (bd.kind === 'ware' || bd.kind === 'wall') {
       c.setHex(bd.color); const dark = c.clone().multiplyScalar(0.72).getHex();
       ch.b.box(w, bd.h, d, [dark, bd.color], cx, y0 + bd.h / 2, cz);
@@ -274,8 +377,12 @@ export function paintMap(world, px) {
   c.fillStyle = '#50545c';
   for (const e of world.edges) e.horiz ? c.fillRect(e.a.x, e.a.z - 7, e.b.x - e.a.x, 14) : c.fillRect(e.a.x - 7, e.a.z, 14, e.b.z - e.a.z);
   for (const n of world.roadNodes) c.fillRect(n.x - 7, n.z - 7, 14, 14);
-  c.fillStyle = 'rgba(60,56,52,.75)';
-  for (const b of world.buildings) c.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0);
+  for (const b of world.buildings) {
+    if (b.destroyed) c.fillStyle = '#3a3632';            // 炸平了：小地图上也不再是楼，只剩废墟色
+    else if (b.kind === 'landmark') c.fillStyle = '#d8a020';   // 地标单独用金色标出来
+    else c.fillStyle = 'rgba(60,56,52,.75)';
+    c.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0);
+  }
   const p = world.places.pier; c.fillStyle = '#8a6a48'; c.fillRect(p.x0, p.z0, p.x1 - p.x0, p.z1 - p.z0);
   return cv;
 }

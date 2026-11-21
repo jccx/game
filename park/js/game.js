@@ -78,6 +78,7 @@ export class Park {
     this.nextVisitorId = 1;
     this.spawnT = 0;
     this.coaster = { station: null, segments: [] }; // station: {x, z} 站台左上角格
+    this._coasterTrace = null; // 过山车轨道推演缓存：站台/段数不变时复用，render 每帧都读它，不缓存每帧都要重新算一遍
     this.researched = new Set();
     this.totalEarned = 0; this.totalSpent = 0; this.served = 0; this.todayEarned = 0; this.todaySpent = 0;
     this._satisfaction = []; // 今天游客离园时的心情，用于算口碑
@@ -85,7 +86,13 @@ export class Park {
 
   emit(ev) { if (this.events.length < 500) this.events.push(ev); }
   get ticketCap() { return this.researched.has('ticket') ? TICKET.maxResearched : TICKET.max; }
-  get coasterTrace() { return traceCoaster(this.coaster.station, this.coaster.segments); }
+  /** 轨道推演结果缓存：只有站台或段数变了才重算（render 每帧、HUD、运营判定都读它） */
+  get coasterTrace() {
+    if (!this._coasterTrace) this._coasterTrace = traceCoaster(this.coaster.station, this.coaster.segments);
+    return this._coasterTrace;
+  }
+  /** 轨道变了（加段/撤销/清空/建站台/拆除/读档）就丢掉推演缓存，下次读时重算 */
+  _invalidateCoaster() { this._coasterTrace = null; }
   get coasterClosed() { return this.coasterTrace.closed; }
   get coasterOperable() {
     const st = this.buildings.find((b) => b.type === 'coaster');
@@ -142,7 +149,7 @@ export class Park {
     if (!this.god) this._pay(def.cost);
     const b = { id: this.nextBuildingId++, type: kind, x, z, w: def.w, d: def.d, queue: [], riders: [], cycleT: 0 };
     this.buildings.push(b);
-    if (kind === 'coaster') this.coaster.station = { x, z };
+    if (kind === 'coaster') { this.coaster.station = { x, z }; this._invalidateCoaster(); }
     this.emit({ type: 'build', kind, x, z, building: b });
     return { ok: true, building: b };
   }
@@ -156,7 +163,7 @@ export class Park {
       // 正在排队/乘坐的游客先放走
       for (const vid of [...b.queue, ...b.riders.map((r) => r.vid)]) { const v = this.visitorById(vid); if (v) this._sendHome(v); }
       this.buildings.splice(bi, 1);
-      if (b.type === 'coaster') { this.coaster = { station: null, segments: [] }; }
+      if (b.type === 'coaster') { this.coaster = { station: null, segments: [] }; this._invalidateCoaster(); }
       const refund = Math.round(BUILDING[b.type].cost * DEMOLISH_REFUND);
       this.money += refund;
       this.emit({ type: 'demolish', kind: b.type, refund });
@@ -191,6 +198,7 @@ export class Park {
     }
     if (!this.god) this._pay(COASTER.segmentCost);
     this.coaster.segments.push(seg);
+    this._invalidateCoaster();
     const closed = traceCoaster(this.coaster.station, this.coaster.segments).closed;
     this.emit({ type: 'coaster', segments: this.coaster.segments.length, closed });
     return { ok: true, closed };
@@ -200,6 +208,7 @@ export class Park {
   coasterUndo() {
     const s = this.coaster.segments.pop();
     if (!s) return { ok: false, reason: '没有轨道可删' };
+    this._invalidateCoaster();
     this.money += Math.round(COASTER.segmentCost / 2);
     return { ok: true };
   }
@@ -208,6 +217,7 @@ export class Park {
   coasterClear() {
     const n = this.coaster.segments.length;
     this.coaster.segments = [];
+    this._invalidateCoaster();
     this.money += Math.round((COASTER.segmentCost / 2) * n);
     return { ok: true, refunded: n };
   }
@@ -264,20 +274,24 @@ export class Park {
   /** BFS 找路：从 (x0,z0) 到 (x1,z1)，只走路/入口/广场。返回格子列表，不含起点 */
   findPath(x0, z0, x1, z1) {
     if (!this._walkable(x1, z1) && !(x1 === x0 && z1 === z0)) return null;
+    // prev：子格 "x,z" → 父格 [x, z]（直接存坐标，重建路径时不用再 split 字符串）
     const prev = new Map(), seen = new Set([key(x0, z0)]);
     const q = [[x0, z0]];
-    while (q.length) {
-      const [cx, cz] = q.shift();
+    let head = 0; // 队首指针：不用 q.shift()，避免每次搬移整个队列（BFS 最多 432 格，shift 是 O(n)）
+    while (head < q.length) {
+      const [cx, cz] = q[head++];
       if (cx === x1 && cz === z1) {
+        // 倒着收集再反转，不用 unshift（unshift 也是 O(n)）
         const path = [];
-        let cur = key(x1, z1);
-        while (cur !== key(x0, z0)) { const [px, pz] = cur.split(',').map(Number); path.unshift([px, pz]); cur = prev.get(cur); }
+        let cur = [x1, z1];
+        while (!(cur[0] === x0 && cur[1] === z0)) { path.push(cur); cur = prev.get(key(cur[0], cur[1])); }
+        path.reverse();
         return path;
       }
       for (const [dx, dz] of DIRS) {
         const nx = cx + dx, nz = cz + dz, k = key(nx, nz);
         if (!inBounds(nx, nz) || seen.has(k) || !this._walkable(nx, nz)) continue;
-        seen.add(k); prev.set(k, key(cx, cz)); q.push([nx, nz]);
+        seen.add(k); prev.set(k, [cx, cz]); q.push([nx, nz]);
       }
     }
     return null;
@@ -556,6 +570,7 @@ export class Park {
     p.visitors = data.visitors.map((v) => ({ ...v, path: v.path.map((q) => [...q]) }));
     p.nextVisitorId = data.nextVisitorId; p.spawnT = data.spawnT || 0;
     p.coaster = { station: data.coaster.station ? { ...data.coaster.station } : null, segments: [...data.coaster.segments] };
+    p._invalidateCoaster(); // 读档直接换了整个 coaster 对象，推演缓存作废
     p.researched = new Set(data.researched || []);
     p.totalEarned = data.totalEarned || 0; p.totalSpent = data.totalSpent || 0; p.served = data.served || 0;
     p.events = [];

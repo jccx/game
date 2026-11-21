@@ -14,6 +14,7 @@ export class Sim {
   constructor(save = {}) {
     this.world = new World();
     this.time = 0;
+    this.refillToastT = -99;   // 上一次弹“子弹已补满”提示的游戏时间（节流用，见 refillWeapon）
     this.events = [];
     this.vehicles = []; this.peds = []; this.shots = []; this.pickups = [];
     const sp = this.world.places.spawn;
@@ -286,12 +287,14 @@ export class Sim {
     p.weapon = i; this.emit({ type: 'weapon', i });
   }
 
-  /** 子弹打空时自动补满到该武器的初始子弹数（config.js 的 AMMO），不改武器、不改伤害 */
+  /** 子弹打空时自动补满到该武器的初始子弹数（config.js 的 AMMO），不改武器、不改伤害。
+   * 补满提示节流：1 秒内只弹一次——火箭筒现在 10 发/秒、6 发一补，每 0.6 秒就补一次，
+   * 不节流的话“火箭筒子弹已补满”会一直刷屏。右上武器栏的闪烁（refill 事件）不受影响，照旧每次都闪。 */
   refillWeapon(i) {
     const p = this.player;
     p.ammo[i] = AMMO[i];
     this.emit({ type: 'refill', i });
-    this.toast(`${WEAPONS[i].name}子弹已补满`);
+    if (this.time - this.refillToastT >= 1) { this.refillToastT = this.time; this.toast(`${WEAPONS[i].name}子弹已补满`); }
   }
 
   /** 自动瞄准：优先正在追捕/敌对的人，其次是准星附近的其他目标。返回 { x, z, ped?, veh? } 或 null */
@@ -313,7 +316,9 @@ export class Sim {
 
   playerAttack() {
     const p = this.player, wp = WEAPONS[p.weapon];
-    if (p.shootCd > 0) return;
+    // 冷却用 1e-9 而不是 0：0.1 秒不是 3 帧（1/30 秒）的整数倍，3 帧后 shootCd 会剩约 1e-17，
+    // 用 > 0 判断会多等一帧，10 发/秒实际只有 7.5 发/秒
+    if (p.shootCd > 1e-9) return;
     if (!wp.melee && p.ammo[p.weapon] <= 0) this.refillWeapon(p.weapon);   // 子弹是 0 就先补满再开火（不会换武器）
     p.shootCd = 1 / wp.rate; p.atkSeq++;
     const tg = this.pickAim(wp.melee ? wp.range + 0.6 : wp.range);
@@ -329,8 +334,8 @@ export class Sim {
     if (p.ammo[p.weapon] <= 0) this.refillWeapon(p.weapon);   // 打到 0 的瞬间补满，正在开火的那把能继续开火
     this.noise(p.x, p.z, 45);
     if (wp.explosive) {
+      // shoot() 自己会发一个 shot 事件（位置是火箭出发点），这里不再单独发一个，不然每发火箭有两个 shot 事件、发射音效响两遍
       this.shoot({ x: p.x + Math.sin(yaw) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(yaw) * 0.8, dx: Math.sin(yaw), dy: 0.02, dz: Math.cos(yaw), speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: null });   // 火箭筒射程无限：飞到命中才爆炸（瞄准辅助还是只看 130 米内，见上面的 pickAim）
-      this.emit({ type: 'shot', x: p.x, z: p.z, w: wp.id, mine: true });
       return;
     }
     for (let k = 0; k < (wp.pellets || 1); k++) this.hitscan(p.x, p.y + 1.4, p.z, yaw + (Math.random() - 0.5) * 2 * wp.spread, wp.range, wp.dmg, true, null);
@@ -345,7 +350,7 @@ export class Sim {
    */
   vehicleRocket() {
     const p = this.player, v = p.inVeh, R = WEAPON_INDEX.rocket;
-    if (!v || !p.owned[R] || p.shootCd > 0) return;
+    if (!v || !p.owned[R] || p.shootCd > 1e-9) return;   // 冷却阈值见 playerAttack：1e-9 才能真到 10 发/秒
     if (p.ammo[R] <= 0) this.refillWeapon(R);
     p.shootCd = 1 / WEAPONS[R].rate; p.atkSeq++;
     const yaw = this.ctl.aimSet ? this.ctl.aimYaw : v.yaw;
@@ -354,8 +359,8 @@ export class Sim {
     if (p.ammo[R] <= 0) this.refillWeapon(R);   // 打到 0 的瞬间补满
     this.noise(v.x, v.z, 45);
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    // shoot() 自己会发一个 shot 事件，这里不再单独发一个，不然每发火箭有两个 shot 事件、发射音效响两遍
     this.shoot({ x: v.x + fx * (v.spec.len / 2 + 1), y: v.y + 2.2, z: v.z + fz * (v.spec.len / 2 + 1), dx: fx, dy: 0.02, dz: fz, speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: v });
-    this.emit({ type: 'shot', x: v.x, z: v.z, w: 'rocket', mine: true });
   }
 
   /** 枪响：附近的行人受惊逃跑，路上的司机踩油门；有人听见还会报警 */
@@ -438,8 +443,30 @@ export class Sim {
     }
     const d = Math.hypot(p.x - x, p.z - z);
     if (d < r && !(p.inVeh && p.inVeh === src)) this.hurtPlayer(dmg * (1 - d / r) * (p.inVeh ? 0.5 : 0.45));
+    // 建筑伤害：爆炸点到建筑 footprint 的最近点水平距离小于爆炸半径才扣血，按距离衰减（复用载具那套思路）；
+    // 高度也要在建筑的垂直范围内（上下各放宽 3 米），高空飞过的火箭不隔空炸楼
+    const w = this.world;
+    const seen = new Set();   // 大楼的 footprint 可能跨好几个空间哈希格子，nearBuildings 会把它回调好几次，同一栋楼一次爆炸只能扣一次血
+    w.nearBuildings(x, z, r, (b) => {
+      if (seen.has(b)) return;
+      seen.add(b);
+      const cx = clamp(x, b.x0, b.x1), cz = clamp(z, b.z0, b.z1);
+      const dd = Math.hypot(x - cx, z - cz);
+      if (dd >= r) return;
+      if (y < b.y0 - 3 || y > b.y0 + b.h + 3) return;
+      this.damageBuilding(b, dmg * (1 - dd / r));
+    });
     this.noise(x, z, 60);
     if (byPlayer) this.crime(CRIME.wreck * 0.5);
+  }
+
+  /** 建筑受伤。hp 归零就夷为平地：碰撞、屋顶、遮挡都消失，本局内不再恢复（重开游戏才恢复） */
+  damageBuilding(b, dmg) {
+    if (b.destroyed || dmg <= 0) return;
+    b.hp -= dmg;
+    if (b.hp > 0) return;
+    b.hp = 0; b.destroyed = true;
+    this.emit({ type: 'buildingDown', b });
   }
 
   /* ------------------------------------------------------------ 行人、警察、帮派 */

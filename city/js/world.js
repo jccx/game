@@ -98,6 +98,7 @@ export class World {
     this.buildAirport(rnd);
     this.buildBase(rnd);
     this.scatterTrees(rnd);
+    this.buildLandmarks();
     this.buildings.forEach((b, idx) => {
       for (let gx = Math.floor(b.x0 / 40); gx <= Math.floor(b.x1 / 40); gx++) for (let gz = Math.floor(b.z0 / 40); gz <= Math.floor(b.z1 / 40); gz++) {
         const k = gx * 1000 + gz; let a = this.hash.get(k); if (!a) this.hash.set(k, a = []); a.push(idx);
@@ -119,8 +120,40 @@ export class World {
     return rnd() < 0.08 ? 'park' : 'residential';
   }
 
-  addBuilding(x0, z0, x1, z1, h, kind, color, roof = 0, y0 = CITY_Y) {
-    this.buildings.push({ x0, z0, x1, z1, y0, h, kind, color, roof });
+  /** 建筑耐久（火箭筒一发 320，坦克炮弹一发 520）：民居 1 发、商店/仓库 2 发、高楼 3~4 发、地标 6~8 发 */
+  defaultHp(kind, h) {
+    if (kind === 'house') return 320;
+    if (kind === 'shop' || kind === 'ware') return 640;
+    if (kind === 'tower') return h >= 60 ? 1280 : 960;
+    return 320;   // 围墙
+  }
+
+  addBuilding(x0, z0, x1, z1, h, kind, color, roof = 0, y0 = CITY_Y, opts = {}) {
+    const hp = opts.hp ?? this.defaultHp(kind, h);
+    this.buildings.push({ x0, z0, x1, z1, y0, h, kind, color, roof, name: opts.name ?? null, note: opts.note ?? null, hp, maxHp: hp, destroyed: false });
+  }
+
+  /** 世界知名地标：8 栋，固定放在市中心 downtown（位置见 README）。形状在 render/scene.js 里按 name 拼。 */
+  buildLandmarks() {
+    // [名字, 备注, 中心 x, 中心 z, 宽, 深, 高, 几发火箭筒]
+    const list = [
+      ['埃菲尔铁塔', '高 120 米', 840, 800, 40, 40, 120, 6],
+      ['帝国大厦', '高 95 米', 1000, 800, 28, 28, 95, 7],
+      ['哈利法塔', '全城最高，高 150 米', 920, 720, 30, 30, 150, 8],
+      ['悉尼歌剧院', '贝壳形屋顶', 840, 960, 44, 26, 19, 6],
+      ['比萨斜塔', '塔身倾斜约 6 度', 1000, 960, 16, 16, 30, 6],
+      ['大本钟', '方形钟楼加钟面', 1000, 880, 14, 14, 55, 6],
+      ['西尔斯大厦（威利斯大厦）', '含天线 145 米，全城第二高', 920, 880, 36, 36, 130, 8],
+      ['特朗普大厦', '三段阶梯收窄，高 98 米', 840, 880, 26, 26, 98, 7],
+    ];
+    const COLORS = { '埃菲尔铁塔': 0x4a3b2e, '帝国大厦': 0xcbb98f, '哈利法塔': 0x9fb6c9, '悉尼歌剧院': 0xf0ede4, '比萨斜塔': 0xe8e0cc, '大本钟': 0xb8a888, '西尔斯大厦（威利斯大厦）': 0x2e3440, '特朗普大厦': 0x7a93a8 };
+    for (const [name, note, cx, cz, w, d, h, rockets] of list) {
+      const x0 = cx - w / 2, z0 = cz - d / 2, x1 = cx + w / 2, z1 = cz + d / 2;
+      // 腾地方：清掉占了这块地的生成建筑和树（不挡跑道、出生点和任务点，都在市中心街区内）
+      this.buildings = this.buildings.filter((b) => b.x1 < x0 - 2 || b.x0 > x1 + 2 || b.z1 < z0 - 2 || b.z0 > z1 + 2);
+      this.trees = this.trees.filter(([x, z]) => x < x0 - 2 || x > x1 + 2 || z < z0 - 2 || z > z1 + 2);
+      this.addBuilding(x0, z0, x1, z1, h, 'landmark', COLORS[name], 1, CITY_Y, { name, note, hp: rockets * 320 });
+    }
   }
 
   /** 按用途给街区摆建筑和树 */
@@ -279,12 +312,12 @@ export class World {
   /** 地面法线的近似（车在坡上跟着倾斜用）：返回 [沿 x 的坡度, 沿 z 的坡度] */
   slope(x, z) { return [(terrainY(x + 1.5, z) - terrainY(x - 1.5, z)) / 3, (terrainY(x, z + 1.5) - terrainY(x, z - 1.5)) / 3]; }
 
-  /** 附近的建筑（碰撞用）。回调 fn(building) */
+  /** 附近的建筑（碰撞用）。回调 fn(building)。被炸平的建筑跳过：碰撞、屋顶、遮挡都当它不存在 */
   nearBuildings(x, z, r, fn) {
     const g0 = Math.floor((x - r) / 40), g1 = Math.floor((x + r) / 40), h0 = Math.floor((z - r) / 40), h1 = Math.floor((z + r) / 40);
     for (let gx = g0; gx <= g1; gx++) for (let gz = h0; gz <= h1; gz++) {
       const a = this.hash.get(gx * 1000 + gz);
-      if (a) for (let k = 0; k < a.length; k++) fn(this.buildings[a[k]]);
+      if (a) for (let k = 0; k < a.length; k++) { const b = this.buildings[a[k]]; if (!b.destroyed) fn(b); }
     }
   }
 

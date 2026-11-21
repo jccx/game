@@ -29,6 +29,7 @@ export class Vehicle {
     this.wreck = false; this.sunk = false; this.goneT = 0;
     this.flying = false;         // 飞机是否在空中
     this.roofY = null;           // 直升机停在楼顶时记下屋顶高度，地面分支就贴着屋顶而不是贴着地面
+    this.roofB = null;           // 停的是哪栋楼（楼被炸掉时屋顶就没了，直升机要落回地面）
     this.gunCd = 0;              // 坦克炮的冷却
     this.used = false;           // 玩家开过的车不会被随便回收
     this.siren = false;
@@ -64,7 +65,8 @@ export class Vehicle {
     else if (cls === 'heli') this.updateHeli(dt, c);
     else this.updateGround(dt, c);
     this.x = clamp(this.x, 15, SIZE - 15); this.z = clamp(this.z, 15, SIZE - 15);
-    if (cls === 'tank' && c.fire && this.gunCd <= 0 && !this.burning) {
+    // 冷却阈值用 1e-9 而不是 0：0.1 秒不是 3 帧的整数倍，3 帧后 gunCd 会剩约 1e-17，用 <= 0 判断会多等一帧，10 发/秒实际只有 7.5 发/秒
+    if (cls === 'tank' && c.fire && this.gunCd <= 1e-9 && !this.burning) {
       this.gunCd = this.spec.reload;
       const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
       this.sim.shoot({ x: this.x + fx * 4.6, y: this.y + 2.3, z: this.z + fz * 4.6, dx: fx, dy: 0.01, dz: fz, speed: 95, range: 260, radius: 8, dmg: 520, byPlayer: this.driver === 'player', kind: 'shell', owner: this });
@@ -168,10 +170,11 @@ export class Vehicle {
     if (!this.flying) {
       // 地面：不用跑道、不用前飞加速，拉升降杆（pitch）就原地升空；停在楼顶时贴着屋顶高度
       this.vx *= Math.max(0, 1 - 4 * dt); this.vz *= Math.max(0, 1 - 4 * dt); this.speed = 0;
+      if (this.roofB && this.roofB.destroyed) { this.roofY = null; this.roofB = null; }   // 楼顶被炸没了：屋顶没了就落回地面，别悬在半空
       const gy = this.roofY != null ? this.roofY : w.groundY(this.x, this.z);
       this.y += (gy - this.y) * Math.min(1, dt * 14);
       this.pitch += (0 - this.pitch) * Math.min(1, dt * 4); this.roll += (0 - this.roll) * Math.min(1, dt * 4);
-      if (c.pitch > 0.15 && !this.burning) { this.flying = true; this.vy = 3; this.air = 0; this.y += 0.3; this.roofY = null; }
+      if (c.pitch > 0.15 && !this.burning) { this.flying = true; this.vy = 3; this.air = 0; this.y += 0.3; this.roofY = null; this.roofB = null; }
       return;
     }
     // 空中：油门控制前后速度（松油门就悬停），升降杆控制垂直速度，左右压杆转向
@@ -199,7 +202,7 @@ export class Vehicle {
       const ok = this.vy > -9 && Math.abs(this.pitch) < 0.6 && Math.abs(this.roll) < 0.6;
       this.flying = false;
       if (!ok) { this.hp = 0; this.burning = true; this.explode(); return; }
-      this.y = roof.top; this.roofY = roof.top; this.vy = 0; this.speed = v; this.roll = 0;
+      this.y = roof.top; this.roofY = roof.top; this.roofB = roof.b; this.vy = 0; this.speed = v; this.roll = 0;
       this.sim.emit({ type: 'crash', x: this.x, z: this.z, f: 3, v: this });
       return;
     }
@@ -215,7 +218,7 @@ export class Vehicle {
       const ok = this.vy > -9 && Math.abs(sl[0]) + Math.abs(sl[1]) < 0.35;
       this.flying = false;
       if (!ok) { this.hp = 0; this.burning = true; this.explode(); return; }
-      this.vy = 0; this.speed = v; this.roll = 0; this.roofY = null;
+      this.vy = 0; this.speed = v; this.roll = 0; this.roofY = null; this.roofB = null;
       this.sim.emit({ type: 'crash', x: this.x, z: this.z, f: 3, v: this });
     }
   }

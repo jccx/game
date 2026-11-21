@@ -87,6 +87,13 @@ export class View {
     this.scene.fog.near = this.far * 0.3; this.scene.fog.far = this.far;
   }
 
+  /** 有楼被炸平后重建静态场景（废墟代替楼）。全量重建只在炸楼时触发一次；重建用同一个随机种子，所以树和屋顶颜色和原来一样 */
+  rebuildScene() {
+    this.world.dispose();
+    this.world = buildScene(this.sim.world, this.scene, this.stage.level >= 2);
+    this.layout();   // 重建会重置雾效距离，按当前画质重新设
+  }
+
   /** 手指拖动屏幕转动镜头 */
   look(dx, dy) {
     if (!dx && !dy) return;
@@ -124,6 +131,15 @@ export class View {
         const d = Math.hypot(ev.x - p.x, ev.z - p.z);
         this.shake = Math.max(this.shake, clamp(1.6 - d / 45, 0, 1.4));
         if (d < 220) Sfx.play(d < 70 ? 'bigboom' : 'boom', 0.1);
+        break;
+      }
+      case 'buildingDown': {
+        // 楼被炸平了：下个逻辑帧重建一次静态场景（废墟代替楼）。一次爆炸可能炸掉好几栋楼，一帧最多重建一次
+        this.needRebuild = true;
+        const cx = (ev.b.x0 + ev.b.x1) / 2, cz = (ev.b.z0 + ev.b.z1) / 2;
+        this.smoke.emit(cx, ev.b.y0 + 2, cz, { n: 24, speed: [2, 8], dir: [0, 1, 0], spread: 0.9, life: [1.0, 2.0], size: [2, 3.5], grow: 1.2, color: 0x6a6258, alpha: 0.6, drag: 1, r: 2 });
+        this.fire.emit(cx, ev.b.y0 + 2, cz, { n: 16, speed: [2, 8], life: [0.3, 0.7], size: [1, 2.4], color: 0xff8a20, color2: 0xfff0a0, gravity: -6 });
+        this.shake = Math.max(this.shake, 0.7);
         break;
       }
       case 'crash':
@@ -168,6 +184,7 @@ export class View {
     const evs = sim.events;
     for (let i = 0; i < evs.length; i++) this.handle(evs[i]);
     evs.length = 0;
+    if (this.needRebuild) { this.needRebuild = false; this.rebuildScene(); }
 
     // ---- 镜头 ----
     const lx = p.px + (p.x - p.px) * alpha, lz = p.pz + (p.z - p.pz) * alpha;
