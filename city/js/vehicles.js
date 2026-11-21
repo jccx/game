@@ -28,6 +28,7 @@ export class Vehicle {
     this.burning = false; this.burnT = 0;
     this.wreck = false; this.sunk = false; this.goneT = 0;
     this.flying = false;         // 飞机是否在空中
+    this.roofY = null;           // 直升机停在楼顶时记下屋顶高度，地面分支就贴着屋顶而不是贴着地面
     this.gunCd = 0;              // 坦克炮的冷却
     this.used = false;           // 玩家开过的车不会被随便回收
     this.siren = false;
@@ -165,11 +166,12 @@ export class Vehicle {
   updateHeli(dt, c) {
     const s = this.spec, w = this.sim.world;
     if (!this.flying) {
-      // 地面：不用跑道、不用前飞加速，拉升降杆（pitch）就原地升空
+      // 地面：不用跑道、不用前飞加速，拉升降杆（pitch）就原地升空；停在楼顶时贴着屋顶高度
       this.vx *= Math.max(0, 1 - 4 * dt); this.vz *= Math.max(0, 1 - 4 * dt); this.speed = 0;
-      this.y += (w.groundY(this.x, this.z) - this.y) * Math.min(1, dt * 14);
+      const gy = this.roofY != null ? this.roofY : w.groundY(this.x, this.z);
+      this.y += (gy - this.y) * Math.min(1, dt * 14);
       this.pitch += (0 - this.pitch) * Math.min(1, dt * 4); this.roll += (0 - this.roll) * Math.min(1, dt * 4);
-      if (c.pitch > 0.15 && !this.burning) { this.flying = true; this.vy = 3; this.air = 0; this.y += 0.3; }
+      if (c.pitch > 0.15 && !this.burning) { this.flying = true; this.vy = 3; this.air = 0; this.y += 0.3; this.roofY = null; }
       return;
     }
     // 空中：油门控制前后速度（松油门就悬停），升降杆控制垂直速度，左右压杆转向
@@ -189,6 +191,18 @@ export class Vehicle {
     // 机身随速度前倾、随转向侧倾
     this.pitch += (clamp(v / s.max, -0.3, 0.3) * 0.8 - this.pitch) * Math.min(1, dt * 3);
     this.roll += (this.steer * 0.3 - this.roll) * Math.min(1, dt * 3);
+    // 楼顶降落：脚下有够大、够平的屋顶、正在下降、离屋顶不到 0.6 米时，屋顶当作地面按触地判定处理。
+    // 必须在撞楼判定之前查，否则下降到屋顶附近时 collide 会先把飞机判成撞楼爆炸。
+    // 平稳（下降速度 > -9 米/秒，机身倾斜 < 0.6）就正常降落；太快、太斜照旧坠毁。
+    const roof = w.roofAt(this.x, this.z, this.yaw, s.len, s.wid);
+    if (roof && this.vy <= 0 && this.y <= roof.top + 0.6) {
+      const ok = this.vy > -9 && Math.abs(this.pitch) < 0.6 && Math.abs(this.roll) < 0.6;
+      this.flying = false;
+      if (!ok) { this.hp = 0; this.burning = true; this.explode(); return; }
+      this.y = roof.top; this.roofY = roof.top; this.vy = 0; this.speed = v; this.roll = 0;
+      this.sim.emit({ type: 'crash', x: this.x, z: this.z, f: 3, v: this });
+      return;
+    }
     // 撞楼（复用飞机的判定）
     P.x = this.x; P.z = this.z;
     if (w.collide(P, 3, this.y)) { this.x = P.x; this.z = P.z; this.hp = 0; this.burning = true; this.burnT = 0; this.byPlayer = false; this.explode(); return; }
@@ -201,7 +215,7 @@ export class Vehicle {
       const ok = this.vy > -9 && Math.abs(sl[0]) + Math.abs(sl[1]) < 0.35;
       this.flying = false;
       if (!ok) { this.hp = 0; this.burning = true; this.explode(); return; }
-      this.vy = 0; this.speed = v; this.roll = 0;
+      this.vy = 0; this.speed = v; this.roll = 0; this.roofY = null;
       this.sim.emit({ type: 'crash', x: this.x, z: this.z, f: 3, v: this });
     }
   }

@@ -152,6 +152,93 @@ if (!quick) {
       return { ok, inVeh: !!m.sim.player.inVeh, d: Math.hypot(m.sim.player.x - v.x, m.sim.player.z - v.z) };
     });
     check(land.ok && !land.inVeh && land.d < 4, `${name} 轻推降落、平稳落地后下机`, log);
+    // 楼顶降落：上直升机，飞到最高的平顶楼顶上方，轻推慢降
+    const roof = await page.evaluate(() => {
+      const m = window.__city, s = m.sim, p = s.player, w = s.world, c = s.ctl;
+      const tower = w.buildings.filter((b) => b.roof === 0 && (b.x1 - b.x0) >= 18 && (b.z1 - b.z0) >= 18 && b.y0 + b.h >= 30).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+      const cx = (tower.x0 + tower.x1) / 2, cz = (tower.z0 + tower.z1) / 2, top = tower.y0 + tower.h;
+      const h = s.vehicles.find((v) => v.type === 'heli');
+      p.hp = 100; p.godT = Infinity;
+      m.hud.locked = true;
+      p.x = p.px = h.x + 2.5; p.z = p.pz = h.z; p.y = w.groundY(p.x, p.z);
+      c.enter = true; s.update(1 / 30); s.events.length = 0;
+      const entered = p.inVeh === h;
+      h.x = cx; h.z = cz; h.y = top + 30; h.flying = true; h.vy = 0; h.pitch = 0; h.roll = 0; h.yaw = 0;
+      c.pitch = -0.3; c.gas = 0; c.steer = 0; m.loop.fastForward(10); c.pitch = 0;
+      const landed = !h.flying && h.alive && Math.abs(h.y - top) < 1;
+      m.view.camYaw = 0.8;
+      return { entered, landed, top, hy: h.y, cx, cz };
+    });
+    check(roof.entered && roof.landed, `${name} 直升机轻推慢降到楼顶（楼顶 ${roof.top.toFixed(0)} 米，直升机 ${roof.hy.toFixed(1)} 米）`, log);
+    await sleep(800);
+    await shot(page, `city-roof-${name}`);
+    // 楼顶下机（站在楼顶）、再上机、再起飞；起飞后在空中发一枚火箭
+    const roof2 = await page.evaluate((top) => {
+      const m = window.__city, s = m.sim, p = s.player, c = s.ctl, h = s.vehicles.find((v) => v.type === 'heli');
+      c.enter = true; s.update(1 / 30); s.events.length = 0;
+      const onRoof = !p.inVeh && Math.abs(p.y - top) < 1;
+      c.enter = true; s.update(1 / 30); s.events.length = 0;
+      const reboard = p.inVeh === h;
+      c.pitch = 1; c.gas = 0; m.loop.fastForward(2); c.pitch = 0;
+      const airborne = h.flying && h.y > top + 10;
+      const ammo0 = p.ammo[4];
+      c.aimYaw = 0; c.aimSet = true; c.rocket = true; m.loop.fastForward(1); c.rocket = false;
+      const fired = p.ammo[4] === ammo0 - 1 && h.alive;
+      // 落回楼顶，下机
+      c.pitch = -0.4; c.gas = 0; c.steer = 0; m.loop.fastForward(12); c.pitch = 0;
+      const landed2 = !h.flying && h.alive;
+      c.enter = true; s.update(1 / 30); s.events.length = 0;
+      return { onRoof, reboard, airborne, fired, landed2, out: !p.inVeh };
+    }, roof.top);
+    check(roof2.onRoof && roof2.reboard && roof2.airborne, `${name} 楼顶下机站在楼顶、再上机、再起飞`, log);
+    check(roof2.fired, `${name} 直升机空中发火箭筒（弹药减 1，自己的直升机完好）`, log);
+    check(roof2.landed2 && roof2.out, `${name} 直升机落回楼顶后下机`, log);
+    // 轿车上发火箭筒：弹药减 1，自己的车完好
+    const rk = await page.evaluate(() => {
+      const m = window.__city, s = m.sim, p = s.player, w = s.world, c = s.ctl;
+      const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+      p.hp = 100; p.godT = Infinity;
+      p.x = p.px = car.x + 2.5; p.z = p.pz = car.z; p.y = w.groundY(p.x, p.z);
+      c.enter = true; s.update(1 / 30); s.events.length = 0;
+      const entered = p.inVeh === car;
+      let yaw = 0;
+      for (const y of [0, 0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2, 4.8, 5.4]) {
+        if (!w.blocked(car.x, car.z, car.x + Math.sin(y) * 30, car.z + Math.cos(y) * 30, car.y + 2.2)) { yaw = y; break; }
+      }
+      const ammo0 = p.ammo[4], hp0 = car.hp;
+      c.aimYaw = yaw; c.aimSet = true; c.rocket = true; m.loop.fastForward(1); c.rocket = false;
+      const fired = p.ammo[4] === ammo0 - 1;
+      m.loop.fastForward(2);   // 等火箭飞远炸开
+      c.gas = 0; c.pitch = 0; c.steer = 0; c.fire = false;
+      m.hud.locked = false;
+      return { entered, fired, alive: car.alive, hp: car.hp, hp0 };
+    });
+    check(rk.entered && rk.fired && rk.alive && rk.hp === rk.hp0, `${name} 轿车上发火箭筒：弹药减 1，自己的车完好无损`, log);
+    await shot(page, `city-rocket-${name}`);
+    // 高空远射（只在横屏跑一次）：上直升机爬到 150 米以上，朝南发火箭，飞 4 秒（220 米）仍在飞
+    if (name === 'landscape-844x390') {
+      const far = await page.evaluate((top) => {
+        const m = window.__city, s = m.sim, p = s.player, w = s.world, c = s.ctl;
+        const h = s.vehicles.find((v) => v.type === 'heli');
+        p.hp = 100; p.godT = Infinity;
+        m.hud.locked = true;
+        if (p.inVeh) { c.enter = true; s.update(1 / 30); s.events.length = 0; }   // 先下轿车（不然传送会被下车动作抵消）
+        p.x = p.px = h.x + 2.5; p.z = p.pz = h.z; p.y = top;   // 传到楼顶的直升机旁：高度要是楼顶，不是地面
+        c.enter = true; s.update(1 / 30); s.events.length = 0;
+        const entered = p.inVeh === h;
+        c.pitch = 1; c.gas = 0; m.loop.fastForward(12); c.pitch = 0;   // 爬到约 250 米
+        const alt = h.y;
+        const ox = h.x, oz = h.z;
+        c.aimYaw = 0; c.aimSet = true; c.rocket = true; s.update(1 / 30); c.rocket = false;
+        let maxD = 0;
+        for (let i = 0; i < 4 * 30; i++) { s.update(1 / 30); for (const sh of s.shots) maxD = Math.max(maxD, Math.hypot(sh.x - ox, sh.z - oz)); s.events.length = 0; }
+        c.gas = 0; c.pitch = 0; c.steer = 0;
+        m.hud.locked = false;
+        return { entered, alt, maxD, alive: s.shots.length > 0 };
+      }, roof.top);
+      check(far.entered && far.alt > 140 && far.maxD > 200, `${name} 直升机 ${far.alt.toFixed(0)} 米高空发火箭：飞过 ${far.maxD.toFixed(0)} 米仍在飞`, log);
+      await shot(page, `city-rocket-far-${name}`);
+    }
     // 行人密度：先走到市中心（机场附近没有街区，行人不生成），再快进 60 秒；同时记逻辑帧耗时
     const dens = await page.evaluate(() => {
       const m = window.__city, s = m.sim, p = s.player;

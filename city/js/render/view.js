@@ -299,7 +299,7 @@ export class View {
       g.position.set(x, y, z);
       g.rotation.set(-v.pitch, v.pyaw + (v.yaw - v.pyaw) * alpha, v.roll);
       if (vw.prop) { vw.prop.rotation.z += dt * (v.driver ? 14 + Math.abs(v.speed) * 0.8 : 0); vw.prop.visible = v.alive; }
-      if (vw.rotor) { vw.rotor.rotation.y += dt * (v.driver ? 14 + Math.abs(v.speed) * 0.8 : 0); vw.rotor.visible = v.alive; }
+      if (vw.rotor) { vw.rotor.rotation.y += dt * (v.flying ? 14 + Math.abs(v.speed) * 0.8 : 0); vw.rotor.visible = v.alive; }   // 旋翼只在空中转：停稳（地面或楼顶）后停转
       if (vw.light) vw.light.visible = v.alive && (!v.siren || ((t * 5) | 0) % 2 === 0);
       if (vw.rider) vw.rider.visible = !!v.driver && v.alive;
       if (v.wreck && !vw.dead) { vw.dead = true; vw.body.material = MAT_WRECK; }

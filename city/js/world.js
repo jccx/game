@@ -245,6 +245,37 @@ export class World {
     return y;
   }
 
+  /**
+   * 直升机降落用的屋顶查询：(x, z) 为中心、按 yaw 旋转的直升机矩形（长 len、宽 wid）加 margin 后
+   * 完整落在同一栋平顶建筑的屋顶内时，返回 { top: 屋顶高度, b: 建筑 }；否则返回 null。
+   * 只给直升机降落用，不改 collide 对其他载具和行人的行为。
+   * 平顶（roof === 0）才能降：斜屋顶（民居）和带屋顶机房/天线的楼顶有凸起，落上去会穿模，所以不算。
+   */
+  roofAt(x, z, yaw, len, wid, margin = 0.5) {
+    const hl = len / 2 + margin, hw = wid / 2 + margin;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw), rx = -Math.cos(yaw), rz = Math.sin(yaw);
+    let best = null;
+    this.nearBuildings(x, z, Math.max(len, wid), (b) => {
+      if (b.roof !== 0) return;                    // 只要平顶
+      for (const [a, d] of [[hl, hw], [hl, -hw], [-hl, hw], [-hl, -hw]]) {
+        const px = x + a * fx + d * rx, pz = z + a * fz + d * rz;
+        if (px < b.x0 || px > b.x1 || pz < b.z0 || pz > b.z1) return;   // 矩形有一角出界就不算
+      }
+      const top = b.y0 + b.h;
+      if (!best || top > best.top) best = { top, b };
+    });
+    return best;
+  }
+
+  /** 站立高度：地面高度，或者脚下建筑的屋顶高度（人站在楼顶上时）。下机后站楼顶、屋顶行走用。 */
+  supportY(x, z) {
+    let y = this.groundY(x, z);
+    this.nearBuildings(x, z, 1, (b) => {
+      if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) y = Math.max(y, b.y0 + b.h);
+    });
+    return y;
+  }
+
   /** 地面法线的近似（车在坡上跟着倾斜用）：返回 [沿 x 的坡度, 沿 z 的坡度] */
   slope(x, z) { return [(terrainY(x + 1.5, z) - terrainY(x - 1.5, z)) / 3, (terrainY(x, z + 1.5) - terrainY(x, z - 1.5)) / 3]; }
 

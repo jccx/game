@@ -6,7 +6,7 @@ import { VEH, TRAFFIC_MIX, CAR_COLORS, WEAPONS, WEAPON_INDEX, AMMO, PLAYER, PED,
 import { clamp, angDiff } from '../../shared/js/util.js';
 import { Missions } from './missions.js';
 
-const NOCTL = { steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false };
+const NOCTL = { steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, rocket: false };
 let PID = 1;
 
 export class Sim {
@@ -30,8 +30,8 @@ export class Sim {
       shootCd: 0, atkSeq: 0, dead: false, deadT: 0, hitT: 0, godT: 0, speed: 0,
     };
     this.player.ammo[0] = Infinity;
-    // 玩家的操作意图，由界面每帧填写
-    this.ctl = { mx: 0, mz: 0, steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, enter: false, swap: false, aimYaw: 0 };
+    // 玩家的操作意图，由界面每帧填写；aimSet 表示本帧有没有镜头瞄准方向（有就用它，没有就用车头方向）
+    this.ctl = { mx: 0, mz: 0, steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, rocket: false, enter: false, swap: false, aimYaw: 0, aimSet: false };
     // 通缉
     this.heat = 0; this.stars = 0; this.unseenT = 0; this.copSpawnT = 0; this.seen = false; this.seeT = 0; this.wantedLock = false;
     this.spawnT = 0; this.pedT = 0; this.nearBlocks = []; this.nearT = 0;
@@ -200,12 +200,12 @@ export class Sim {
     let done = false;
     for (const sg of [-1, 1]) {
       const x = v.x + rx * d * sg, z = v.z + rz * d * sg, t = { x, z };
-      if (!w.collide(t, PLAYER.radius, v.y)) { p.x = x; p.z = z; done = true; break; }
+      if (!w.collide(t, PLAYER.radius, v.y + 1)) { p.x = x; p.z = z; done = true; break; }   // 高 1 米查：停在楼顶上下机时，落脚点在屋顶上不被推出去；地面上下机时楼顶仍在 1 米以上，照旧挡住
     }
     if (!done) { p.x = v.x; p.z = v.z; }
     // 从船上下来时如果旁边就是栈桥，直接站到栈桥上
     if (v.spec.cls === 'boat') { const pr = w.places.pier; if (p.x > pr.x0 - 9 && p.x < pr.x1 + 9 && p.z > pr.z0 && p.z < pr.z1 + 6) { p.x = clamp(p.x, pr.x0 + 1, pr.x1 - 1); p.z = Math.min(p.z, pr.z1 - 1); } }
-    p.px = p.x; p.pz = p.z; p.y = Math.max(w.groundY(p.x, p.z), -1.15); p.yaw = v.yaw;
+    p.px = p.x; p.pz = p.z; p.y = Math.max(w.supportY(p.x, p.z), -1.15); p.yaw = v.yaw;   // 下机站在地面，或者停在楼顶时站在屋顶上
     if (force) this.hurtPlayer(v.sunk ? 0 : 45);
     this.emit({ type: 'exit', v });
   }
@@ -236,6 +236,7 @@ export class Sim {
     const v = p.inVeh;
     if (v) {
       p.x = v.x; p.y = v.y; p.z = v.z; p.yaw = v.yaw; p.speed = Math.abs(v.speed); p.moving = false; p.swim = false;
+      if (c.rocket) this.vehicleRocket();   // 车上只能发火箭筒（步行开火到不了这里，坦克炮走载具自己的 c.fire）
       return;
     }
     // 步行
@@ -246,14 +247,16 @@ export class Sim {
       const k = Math.min(1, m) / m;
       p.x += c.mx * k * sp * dt; p.z += c.mz * k * sp * dt; p.yaw = Math.atan2(c.mx, c.mz); p.moving = true; p.speed = sp * Math.min(1, m);
     } else { p.moving = false; p.speed = 0; }
-    w.collide(p, PLAYER.radius, p.y);
+    // 站在楼顶上时不被建筑碰撞推下去（屋顶行走）；走到边缘、脚下没楼顶了就恢复碰撞，正常掉下去
+    const onRoof = p.y > w.groundY(p.x, p.z) + 0.5 && Math.abs(p.y - w.supportY(p.x, p.z)) < 0.6;
+    if (!onRoof) w.collide(p, PLAYER.radius, p.y);
     for (const o of this.vehicles) {             // 不能穿过车
       if (o.sunk) continue;
       const dx = p.x - o.x, dz = p.z - o.z, min = o.radius * 0.8 + PLAYER.radius, d2 = dx * dx + dz * dz;
       if (d2 < min * min && d2 > 1e-6 && Math.abs(o.y - p.y) < 3) { const d = Math.sqrt(d2); p.x = o.x + (dx / d) * min; p.z = o.z + (dz / d) * min; }
     }
     p.x = clamp(p.x, 12, SIZE - 12); p.z = clamp(p.z, 12, SIZE - 12);
-    const gy = w.groundY(p.x, p.z);
+    const gy = w.supportY(p.x, p.z);   // 地面高度，或者脚下建筑的屋顶高度（站在楼顶上时）
     p.y = deep ? -1.15 : p.y + (Math.max(gy, -1.15) - p.y) * Math.min(1, dt * 16);
     if (c.fire && !deep) this.playerAttack();
     // 拾取
@@ -326,12 +329,33 @@ export class Sim {
     if (p.ammo[p.weapon] <= 0) this.refillWeapon(p.weapon);   // 打到 0 的瞬间补满，正在开火的那把能继续开火
     this.noise(p.x, p.z, 45);
     if (wp.explosive) {
-      this.shoot({ x: p.x + Math.sin(yaw) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(yaw) * 0.8, dx: Math.sin(yaw), dy: 0.02, dz: Math.cos(yaw), speed: wp.speed, range: wp.range, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: null });
+      this.shoot({ x: p.x + Math.sin(yaw) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(yaw) * 0.8, dx: Math.sin(yaw), dy: 0.02, dz: Math.cos(yaw), speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: null });   // 火箭筒射程无限：飞到命中才爆炸（瞄准辅助还是只看 130 米内，见上面的 pickAim）
       this.emit({ type: 'shot', x: p.x, z: p.z, w: wp.id, mine: true });
       return;
     }
     for (let k = 0; k < (wp.pellets || 1); k++) this.hitscan(p.x, p.y + 1.4, p.z, yaw + (Math.random() - 0.5) * 2 * wp.spread, wp.range, wp.dmg, true, null);
     this.emit({ type: 'shot', x: p.x, z: p.z, w: wp.id, mine: true });
+  }
+
+  /**
+   * 车上发射火箭筒：六种载具都能发，只发火箭筒，不动当前选中的武器，下车后武器和弹药状态不变。
+   * 方向用镜头瞄准方向（ctl.aimYaw），没有瞄准方向时用车头方向；火箭从车顶前方出发，射程无限。
+   * owner 传自己的车：updateShots 不会打中自己的车，explode 也不会炸伤自己的车和车里的人。
+   * 弹药走玩家自己的火箭筒弹药数，打空自动补满到 6 发；射速、伤害、射程、爆炸半径和步行一致。
+   */
+  vehicleRocket() {
+    const p = this.player, v = p.inVeh, R = WEAPON_INDEX.rocket;
+    if (!v || !p.owned[R] || p.shootCd > 0) return;
+    if (p.ammo[R] <= 0) this.refillWeapon(R);
+    p.shootCd = 1 / WEAPONS[R].rate; p.atkSeq++;
+    const yaw = this.ctl.aimSet ? this.ctl.aimYaw : v.yaw;
+    const wp = WEAPONS[R];
+    p.ammo[R]--;
+    if (p.ammo[R] <= 0) this.refillWeapon(R);   // 打到 0 的瞬间补满
+    this.noise(v.x, v.z, 45);
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    this.shoot({ x: v.x + fx * (v.spec.len / 2 + 1), y: v.y + 2.2, z: v.z + fz * (v.spec.len / 2 + 1), dx: fx, dy: 0.02, dz: fz, speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: v });
+    this.emit({ type: 'shot', x: v.x, z: v.z, w: 'rocket', mine: true });
   }
 
   /** 枪响：附近的行人受惊逃跑，路上的司机踩油门；有人听见还会报警 */
@@ -389,9 +413,10 @@ export class Sim {
       const step = s.speed * dt;
       s.x += s.dx * step; s.y += s.dy * step; s.z += s.dz * step; s.left -= step; s.dy -= dt * 0.12;
       let hit = s.left <= 0 || s.y <= Math.max(w.groundY(s.x, s.z), 0) + 0.1;
+      if (!hit && (s.x < -200 || s.x > SIZE + 200 || s.z < -200 || s.z > SIZE + 200 || s.y > 600)) hit = true;   // 飞出地图边界：按过期处理，直接爆炸清理，不占着 shots 数组（重力会让火箭最终落下，这里是兜底）
       if (!hit) w.nearBuildings(s.x, s.z, 0.5, (b) => { if (s.x > b.x0 && s.x < b.x1 && s.z > b.z0 && s.z < b.z1 && s.y < b.y0 + b.h) hit = true; });
       if (!hit) for (const v of this.vehicles) if (v !== s.owner && !v.sunk && Math.hypot(v.x - s.x, v.z - s.z) < v.radius && Math.abs(v.y + 1 - s.y) < 3) { hit = true; break; }
-      if (!hit) for (const o of this.peds) if (o.alive && Math.hypot(o.x - s.x, o.z - s.z) < 1.1) { hit = true; break; }
+      if (!hit) for (const o of this.peds) if (o.alive && Math.hypot(o.x - s.x, o.z - s.z) < 1.1 && Math.abs(o.y + 1 - s.y) < 3) { hit = true; break; }   // 打行人也要看高度：从楼顶/直升机上打出去的火箭在高空飞过时，不能因为正下方有个行人就半空炸了（贴地飞时照旧能打中行人）
       if (!hit && !s.byPlayer) { const p = this.player; if (Math.hypot(p.x - s.x, p.z - s.z) < 1.3) hit = true; }
       if (hit) { s.alive = false; this.shots.splice(i, 1); this.explode(s.x, s.y, s.z, s.radius, s.dmg, s.byPlayer, s.owner); }
     }
@@ -602,7 +627,7 @@ export class Sim {
 
   /** 电脑开车：算出这一帧的方向盘和油门 */
   drive(v, dt) {
-    const ai = v.ai, p = this.player, c = { steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false };
+    const ai = v.ai, p = this.player, c = { steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, rocket: false };
     if (ai.kind === 'idle') return c;
     let tx, tz, want = TRAFFIC.speed;
     if (ai.kind === 'traffic') {

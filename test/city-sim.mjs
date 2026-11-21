@@ -173,7 +173,7 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     for (let i = 0; i < 240 * TICK; i++) {
       if (i % 45 === 0) {
         const c = sim.ctl; c.mx = Math.random() * 2 - 1; c.mz = Math.random() * 2 - 1; c.steer = Math.random() * 2 - 1; c.gas = Math.random() < 0.8 ? 1 : -1; c.pitch = Math.random() * 2 - 1;
-        c.fire = Math.random() < 0.4; c.aimYaw = Math.random() * 6.28; c.handbrake = Math.random() < 0.1;
+        c.fire = Math.random() < 0.4; c.rocket = Math.random() < 0.2; c.aimYaw = Math.random() * 6.28; c.aimSet = Math.random() < 0.5; c.handbrake = Math.random() < 0.1;
         if (Math.random() < 0.25) c.enter = true; if (Math.random() < 0.1) c.swap = true;
       }
       sim.update(dt); sim.events.length = 0;
@@ -240,6 +240,238 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
   const civ = s4.peds.filter((o) => o.kind === 'civ' && o.alive).length;
   chk(civ >= 30, `空跑 60 秒后附近有 ${civ} 个平民行人（目标 36）`);
   chk(finite(s4), '行人翻倍后数值仍然合法');
+}
+// ---- 10) 直升机降落楼顶（2026-11-21） ----
+{
+  const sim = new Sim(), p = sim.player, w = sim.world;
+  // 找一栋够大的平顶高楼当靶子
+  const tower = w.buildings.filter((b) => b.roof === 0 && (b.x1 - b.x0) >= 18 && (b.z1 - b.z0) >= 18 && b.y0 + b.h >= 30).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+  const cx = (tower.x0 + tower.x1) / 2, cz = (tower.z0 + tower.z1) / 2, top = tower.y0 + tower.h;
+  chk(!!tower, `找到一栋够大的平顶高楼（${(tower.x1 - tower.x0).toFixed(0)}x${(tower.z1 - tower.z0).toFixed(0)} 米，顶 ${top.toFixed(0)} 米）`);
+  // roofAt：楼顶中央算，楼顶边缘/小楼/斜屋顶不算
+  chk(w.roofAt(cx, cz, 0, 7.5, 2.6) && Math.abs(w.roofAt(cx, cz, 0, 7.5, 2.6).top - top) < 0.01, '屋顶查询：楼顶中央能降，高度就是 y0 + h');
+  chk(!w.roofAt(tower.x0 + 0.5, cz, 0, 7.5, 2.6), '屋顶查询：贴着楼边、机身一半悬空就不算');
+  chk(!w.roofAt(cx, cz, 0, 30, 30), '屋顶查询：30 米长的“直升机”放不下，不算');
+  const wallRoofs = w.buildings.filter((b) => b.kind === 'wall').map((b) => w.roofAt((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 0, 7.5, 2.6));
+  chk(wallRoofs.every((r) => !r), '屋顶查询：1 米宽的围墙放不下直升机，不算');
+  const house = w.buildings.find((b) => b.kind === 'house');
+  chk(house && !w.roofAt((house.x0 + house.x1) / 2, (house.z0 + house.z1) / 2, 0, 7.5, 2.6), '屋顶查询：斜屋顶的民居不算（顶上有斜坡会穿模）');
+  // 上直升机，飞到楼顶上方，轻推慢降
+  const heli = sim.vehicles.find((v) => v.type === 'heli');
+  tp(sim, heli.x + 2.5, heli.z); sim.ctl.enter = true; run(sim, 0.1);
+  chk(p.inVeh === heli, '上直升机，准备飞楼顶');
+  heli.x = cx; heli.z = cz; heli.y = top + 30; heli.flying = true; heli.vy = 0; heli.pitch = 0; heli.roll = 0; heli.yaw = 0;
+  run(sim, 12, () => { sim.ctl.pitch = -0.3; sim.ctl.gas = 0; sim.ctl.steer = 0; });
+  chk(!heli.flying && heli.alive && Math.abs(heli.y - top) < 0.6, `轻推慢降到楼顶中央：平稳降落不爆炸（高度 ${heli.y.toFixed(1)} 米，楼顶 ${top.toFixed(1)} 米）`);
+  // 停稳后下机，站在楼顶上
+  sim.ctl.enter = true; run(sim, 0.2);
+  chk(!p.inVeh && Math.abs(p.y - top) < 1, `降落后下机，站在楼顶上（玩家高度 ${p.y.toFixed(1)} 米）`);
+  // 再上机、再起飞
+  sim.ctl.enter = true; run(sim, 0.1);
+  chk(p.inVeh === heli, '楼顶上能再上直升机');
+  run(sim, 3, () => { sim.ctl.pitch = 1; sim.ctl.gas = 0; });
+  chk(heli.flying && heli.y > top + 10, `楼顶再起飞，3 秒升到楼顶上方 ${(heli.y - top).toFixed(0)} 米`);
+  // 再落回楼顶，下机后在楼顶上走路，走出几米还在楼顶上
+  run(sim, 12, () => { sim.ctl.pitch = -0.3; sim.ctl.gas = 0; sim.ctl.steer = 0; });
+  chk(!heli.flying && heli.alive && Math.abs(heli.y - top) < 0.6, '第二次轻推慢降，照旧平稳落在楼顶上');
+  sim.ctl.enter = true; run(sim, 0.2);
+  chk(!p.inVeh && Math.abs(p.y - top) < 1, '第二次下机，站在楼顶上');
+  const px0 = p.x;
+  run(sim, 0.5, () => { sim.ctl.mx = 1; sim.ctl.mz = 0; });
+  sim.ctl.mx = 0;
+  chk(p.x - px0 > 1.5 && Math.abs(p.y - top) < 1, `在楼顶上能走路，走出 ${(p.x - px0).toFixed(1)} 米还在楼顶上`);
+  // 满杆砸下来照旧坠毁
+  const s2 = new Sim(), h2 = s2.vehicles.find((v) => v.type === 'heli');
+  tp(s2, h2.x + 2.5, h2.z); s2.ctl.enter = true; run(s2, 0.1);
+  h2.x = cx; h2.z = cz; h2.y = top + 30; h2.flying = true; h2.vy = 0; h2.pitch = 0; h2.roll = 0; h2.yaw = 0;
+  run(s2, 6, () => { s2.ctl.pitch = -1; s2.ctl.gas = 0; });
+  chk(!h2.alive && !s2.player.inVeh, '满杆下降砸楼顶照旧坠毁');
+  // 机身太斜：快到楼顶时强行侧倾，也坠毁（正常飞行里俯仰/侧倾到不了 0.6，这里直接改状态验判定）
+  const s3 = new Sim(), h3 = s3.vehicles.find((v) => v.type === 'heli');
+  tp(s3, h3.x + 2.5, h3.z); s3.ctl.enter = true; run(s3, 0.1);
+  h3.x = cx; h3.z = cz; h3.y = top + 0.5; h3.flying = true; h3.vy = 0; h3.pitch = 1.2; h3.roll = 0; h3.yaw = 0;
+  run(s3, 1, () => { s3.ctl.pitch = -0.3; s3.ctl.gas = 0; });
+  chk(!h3.alive, '机身太斜着落楼顶照旧坠毁');
+  // 撞楼侧面照旧坠毁：从楼顶高度以下横着飞过去撞墙
+  const s4 = new Sim(), h4 = s4.vehicles.find((v) => v.type === 'heli');
+  tp(s4, h4.x + 2.5, h4.z); s4.ctl.enter = true; run(s4, 0.1);
+  h4.x = tower.x0 - 25; h4.z = cz; h4.y = top - 8; h4.flying = true; h4.vy = 0; h4.yaw = Math.PI / 2; h4.pitch = 0; h4.roll = 0;
+  run(s4, 4, () => { s4.ctl.pitch = 0; s4.ctl.gas = 1; s4.ctl.steer = 0; });
+  chk(!h4.alive, '从楼顶高度以下横着撞楼侧面照旧坠毁');
+  // 楼顶降落不影响地面降落：轻推落回地面照旧
+  const s5 = new Sim(), h5 = s5.vehicles.find((v) => v.type === 'heli');
+  tp(s5, h5.x + 2.5, h5.z); s5.ctl.enter = true; run(s5, 0.1);
+  run(s5, 3, () => { s5.ctl.pitch = 1; });
+  run(s5, 10, () => { s5.ctl.pitch = -0.4; s5.ctl.gas = 0; s5.ctl.steer = 0; });
+  chk(!h5.flying && h5.alive, '地面轻推降落照旧平稳落地');
+  chk(finite(s5), '楼顶降落一轮后数值仍然合法');
+}
+
+// ---- 11) 载具上发射火箭筒（2026-11-21） ----
+{
+  const R = WEAPON_INDEX.rocket;
+  // 按住火箭键跑几秒，数这期间发出的火箭弹和坦克炮弹
+  const holdRocket = (sim, secs) => {
+    let rocket = 0, shell = 0, booms = 0;
+    sim.ctl.rocket = true;
+    for (let i = 0; i < secs * TICK; i++) {
+      sim.update(dt);
+      for (const e of sim.events) { if (e.type === 'shot' && e.w === 'rocket') rocket++; if (e.type === 'shot' && e.w === 'shell') shell++; if (e.type === 'explosion') booms++; }
+      sim.events.length = 0;
+    }
+    sim.ctl.rocket = false;
+    return { rocket, shell, booms };
+  };
+  // 找一条从车的位置出发、30 米内没有建筑的开阔方向，免得火箭一出发就撞楼、炸伤自己的车
+  const clearYaw = (sim, v) => {
+    for (const y of [0, 0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2, 4.8, 5.4]) {
+      if (!sim.world.blocked(v.x, v.z, v.x + Math.sin(y) * 30, v.z + Math.cos(y) * 30, v.y + 2.2)) return y;
+    }
+    return 0;
+  };
+  for (const [type, name] of [['sedan', '轿车'], ['bike', '摩托'], ['boat', '快艇'], ['plane', '飞机'], ['heli', '直升机'], ['tank', '坦克']]) {
+    const sim = new Sim(), p = sim.player;
+    const v = sim.vehicles.find((o) => o.type === type && o.usable && !o.driver);
+    tp(sim, v.x + 2.5, v.z); sim.ctl.enter = true; run(sim, 0.1);
+    chk(p.inVeh === v, `上${name}准备发火箭筒`);
+    if (type === 'heli') { run(sim, 3, () => { sim.ctl.pitch = 1; sim.ctl.gas = 0; }); sim.ctl.pitch = 0; sim.ctl.gas = 0; }   // 直升机先升空，空中也能发；升空后收杆悬停，不然会一直爬升
+    sim.ctl.aimYaw = clearYaw(sim, v); sim.ctl.aimSet = true;
+    const hp0 = v.hp, ammo0 = p.ammo[R], weapon0 = p.weapon;
+    const r = holdRocket(sim, 1);
+    chk(r.rocket >= 1 && p.ammo[R] === ammo0 - 1, `${name}上发火箭筒：火箭飞出去了，弹药 ${ammo0} → ${p.ammo[R]}`);
+    chk(v.alive && v.hp === hp0, `${name}上发火箭筒：自己的车完好无损（耐久 ${v.hp}/${v.spec.hp}）`);
+    chk(p.weapon === weapon0, `${name}上发火箭不改变当前选中的武器（还是${WEAPONS[weapon0].name}）`);
+    // 发出去的火箭不会一出发就炸自己的车：再跑 2 秒，等它飞远炸开，自己的车还是完好
+    run(sim, 2);
+    chk(v.alive && v.hp === hp0, `${name}上火箭飞远爆炸后，自己的车还是完好无损`);
+    if (type === 'heli') run(sim, 12, () => { sim.ctl.pitch = -0.4; sim.ctl.gas = 0; sim.ctl.steer = 0; });   // 直升机先落回地面再下机
+    // 下车后武器和弹药状态不变
+    sim.ctl.enter = true; run(sim, 0.2);
+    chk(!p.inVeh && p.ammo[R] === ammo0 - 1 && p.weapon === weapon0, `${name}上下车后火箭弹药还是 ${p.ammo[R]} 发，武器没变`);
+  }
+  // 弹药打空自动补满到 6 发，和步行一致
+  {
+    const sim = new Sim(), p = sim.player;
+    const car = sim.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(sim, car.x + 2.5, car.z); sim.ctl.enter = true; run(sim, 0.1);
+    sim.ctl.aimYaw = clearYaw(sim, car); sim.ctl.aimSet = true;
+    p.ammo[R] = 1; p.shootCd = 0;
+    holdRocket(sim, 1);
+    chk(p.ammo[R] === 6, `车上火箭剩 1 发时开一发，打空后自动补满到 6 发（当前 ${p.ammo[R]}）`);
+  }
+  // 没有瞄准方向时用车头方向：aimSet 为假，瞄准角写个错的也不用
+  {
+    const sim = new Sim(), p = sim.player;
+    const car = sim.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(sim, car.x + 2.5, car.z); sim.ctl.enter = true; run(sim, 0.1);
+    sim.ctl.aimYaw = 2.5; sim.ctl.aimSet = false;   // 瞄准角 2.5 是错的，车头朝北（yaw 0）
+    sim.ctl.rocket = true; sim.update(dt); sim.ctl.rocket = false;
+    const s = sim.shots[0];
+    chk(s && Math.abs(s.dx - Math.sin(car.yaw)) < 0.01 && Math.abs(s.dz - Math.cos(car.yaw)) < 0.01, '没有瞄准方向时火箭沿车头方向飞（没被错误的瞄准角带偏）');
+  }
+  // 坦克：火箭键只发火箭不发炮，炮键只发炮不发火箭
+  {
+    const sim = new Sim(), p = sim.player;
+    const tank = sim.vehicles.find((v) => v.type === 'tank');
+    tp(sim, tank.x, tank.z + 4); sim.ctl.enter = true; run(sim, 0.1);
+    sim.ctl.aimYaw = clearYaw(sim, tank); sim.ctl.aimSet = true;
+    const r = holdRocket(sim, 2);
+    chk(r.rocket >= 1 && r.shell === 0, `坦克按火箭键：只发火箭（${r.rocket} 发），没同时开炮`);
+    let shells = 0;
+    sim.ctl.fire = true;
+    for (let i = 0; i < 2 * TICK; i++) { sim.update(dt); for (const e of sim.events) if (e.type === 'shot' && e.w === 'shell') shells++; sim.events.length = 0; }
+    sim.ctl.fire = false;
+    chk(shells >= 1, `坦克按开炮键：坦克炮照旧能开火（${shells} 发）`);
+  }
+}
+
+// ---- 12) 火箭筒射程无限（2026-11-21） ----
+// 注意：火箭有重力下坠（每帧 dy 减，不改），地面平射 47 米就落地，所以 200/300 米的测试必须从高处打：
+// 步行从 95 米高的楼顶平射，弹道 300 米才落地；车上从 150 米高的直升机上发，飞得更远。
+{
+  const R = WEAPON_INDEX.rocket;
+  // 沿弹道逐段检查净空：火箭从 y0 平射，y(d) = y0 + 55*(0.02*(d/55) - 0.06*(d/55)^2)，每 10 米一段，留 3 米余量
+  const arcClear = (w, ox, oz, yaw, y0, dist) => {
+    for (let d = 10; d < dist; d += 10) {
+      const t = d / 55, y = y0 + 55 * (0.02 * t - 0.06 * t * t);
+      const x1 = ox + Math.sin(yaw) * d, z1 = oz + Math.cos(yaw) * d;
+      const x2 = ox + Math.sin(yaw) * (d + 10), z2 = oz + Math.cos(yaw) * (d + 10);
+      if (w.blocked(x1, z1, x2, z2, y - 3)) return false;
+    }
+    return true;
+  };
+  // 上直升机，落到最高的平顶楼顶上，下机，走到楼东边 6 米（离直升机远一点，免得火箭一出发就撞上它）
+  const sim = new Sim(), p = sim.player, w = sim.world;
+  const tower = w.buildings.filter((b) => b.roof === 0 && (b.x1 - b.x0) >= 18 && (b.z1 - b.z0) >= 18 && b.y0 + b.h >= 30).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+  const cx = (tower.x0 + tower.x1) / 2, cz = (tower.z0 + tower.z1) / 2, top = tower.y0 + tower.h;
+  const heli = sim.vehicles.find((v) => v.type === 'heli');
+  tp(sim, heli.x + 2.5, heli.z); sim.ctl.enter = true; run(sim, 0.1);
+  heli.x = cx; heli.z = cz; heli.y = top + 30; heli.flying = true; heli.vy = 0; heli.pitch = 0; heli.roll = 0; heli.yaw = 0;
+  run(sim, 12, () => { sim.ctl.pitch = -0.3; sim.ctl.gas = 0; sim.ctl.steer = 0; });
+  chk(!heli.flying && heli.alive, '射程测试：直升机先落到楼顶上');
+  sim.ctl.enter = true; run(sim, 0.2);
+  p.x = p.px = cx + 6; p.z = p.pz = cz;   // 站到楼东边，离直升机 6 米
+  const fx = p.x, fz = p.z, y0 = top + 1.5;
+  // 找一条从楼顶出发、320 米弹道净空的方向
+  let yaw = null;
+  for (let k = 0; k < 16; k++) { const y = k * Math.PI / 8; if (arcClear(w, fx, fz, y, y0, 320)) { yaw = y; break; } }
+  chk(yaw !== null, `找到一条 320 米弹道净空的方向（朝向 ${yaw !== null ? (yaw * 57.3).toFixed(0) : '-'} 度）`);
+  // 步行：火箭飞过 130 米、200 米仍在飞，打中 300 米外的靶车才爆炸
+  const target = sim.addVehicle('target', fx + Math.sin(yaw) * 300, fz + Math.cos(yaw) * 300, 0);
+  target.fixed = true;   // 300 米超出交通回收距离（240 米），不固定会被 spawnTraffic 当远处闲车回收掉
+  chk(w.groundY(target.x, target.z) >= 1.9, '300 米外的靶车落在陆地上');
+  tp(sim, fx, fz); p.y = top; p.weapon = R; p.shootCd = 0; sim.ctl.aimYaw = yaw; sim.ctl.aimSet = true;
+  let maxDist = 0, explodedBefore200 = false, hitTarget = false;
+  sim.ctl.fire = true;
+  for (let i = 0; i < 10 * TICK; i++) {
+    sim.update(dt);
+    for (const s of sim.shots) maxDist = Math.max(maxDist, Math.hypot(s.x - fx, s.z - fz));
+    const booms = sim.events.filter((e) => e.type === 'explosion');
+    if (booms.length && maxDist < 200) explodedBefore200 = true;
+    if (booms.length && (target.burning || !target.alive || target.hp < target.spec.hp)) hitTarget = true;
+    sim.events.length = 0;
+    if (hitTarget) break;
+    if (i === 0) sim.ctl.fire = false;   // 只开一发
+  }
+  chk(maxDist > 200, `楼顶步行发火箭：飞过 ${maxDist.toFixed(0)} 米才炸（130 米处没有自己爆炸）`);
+  chk(!explodedBefore200, '楼顶步行发火箭：200 米内没有爆炸');
+  chk(hitTarget, `楼顶步行发火箭：打中 300 米外的靶车并炸伤它（靶车耐久 ${target.hp.toFixed(0)}/${target.spec.hp}）`);
+  // 自动瞄准仍只在 130 米内：150 米外的靶车不被自动瞄准，火箭按镜头方向直飞、打不中它
+  {
+    const s2 = new Sim(), q = s2.player, w2 = s2.world;
+    const h2 = s2.vehicles.find((v) => v.type === 'heli');
+    tp(s2, h2.x + 2.5, h2.z); s2.ctl.enter = true; run(s2, 0.1);
+    h2.x = cx; h2.z = cz; h2.y = top + 30; h2.flying = true; h2.vy = 0; h2.pitch = 0; h2.roll = 0; h2.yaw = 0;
+    run(s2, 12, () => { s2.ctl.pitch = -0.3; s2.ctl.gas = 0; s2.ctl.steer = 0; });
+    s2.ctl.enter = true; run(s2, 0.2);
+    q.x = q.px = cx + 6; q.z = q.pz = cz;
+    const t2 = s2.addVehicle('target', q.x + Math.sin(yaw) * 150, q.z + Math.cos(yaw) * 150, 0);
+    t2.fixed = true;   // 和上面一样，防止被交通回收
+    q.y = top; q.weapon = R; q.shootCd = 0;
+    s2.ctl.aimYaw = yaw + 0.3; s2.ctl.aimSet = true;   // 故意瞄偏 0.3 弧度
+    s2.ctl.fire = true; s2.update(dt); s2.ctl.fire = false;
+    const s = s2.shots[0];
+    chk(s && Math.abs(s.dx - Math.sin(yaw + 0.3)) < 0.01 && Math.abs(s.dz - Math.cos(yaw + 0.3)) < 0.01, '150 米外的目标不在瞄准辅助内：火箭按镜头方向直飞，不自动拐向目标');
+    let maxD2 = 0;
+    for (let i = 0; i < 6 * TICK; i++) { s2.update(dt); for (const o of s2.shots) maxD2 = Math.max(maxD2, Math.hypot(o.x - q.x, o.z - q.z)); s2.events.length = 0; }
+    chk(maxD2 > 200, `瞄偏的火箭飞过 ${maxD2.toFixed(0)} 米（飞过了 150 米外的目标）`);
+    chk(t2.alive && t2.hp === t2.spec.hp, '火箭按镜头方向飞过，没打中 150 米外瞄偏的目标');
+  }
+  // 车上同样无限射程：直升机爬到 150 米高空，朝南发火箭，飞过 200 米仍在飞
+  {
+    const s3 = new Sim(), q3 = s3.player;
+    const h3 = s3.vehicles.find((v) => v.type === 'heli');
+    tp(s3, h3.x + 2.5, h3.z); s3.ctl.enter = true; run(s3, 0.1);
+    run(s3, 12, () => { s3.ctl.pitch = 1; s3.ctl.gas = 0; });   // 爬到约 150 米
+    s3.ctl.pitch = 0; s3.ctl.gas = 0;   // 悬停
+    chk(h3.flying && h3.y > 140, `直升机爬到 ${h3.y.toFixed(0)} 米高空准备发火箭`);
+    s3.ctl.aimYaw = 0; s3.ctl.aimSet = true;   // 朝南，朝海，净空
+    s3.ctl.rocket = true; s3.update(dt); s3.ctl.rocket = false;
+    let maxD = 0;
+    for (let i = 0; i < 8 * TICK; i++) { s3.update(dt); for (const s of s3.shots) maxD = Math.max(maxD, Math.hypot(s.x - h3.x, s.z - h3.z)); s3.events.length = 0; if (!s3.shots.length) break; }
+    chk(maxD > 200, `直升机高空发火箭：飞过 ${maxD.toFixed(0)} 米仍在飞`);
+    chk(finite(s3), '无限射程一轮后数值仍然合法');
+  }
 }
 console.log(fail ? `有 ${fail} 项失败` : '落日湾逻辑测试全部通过');
 process.exit(fail ? 1 : 0);

@@ -1,7 +1,7 @@
 // 落日湾：界面（HUD）和玩家输入。
 // 手机：左下摇杆（步行时移动；开车时左右转向，上下也可以当油门/刹车；开飞机时上下是俯仰）；
 //      在屏幕右半边空白处拖动可以转镜头；右下是动作键（步行：攻击、上车、换武器；开车：油门、刹车、手刹、下车、开炮）。
-// 电脑：WASD 移动/驾驶，按住鼠标拖动转镜头，空格 攻击/手刹，F 上下车，Q 换武器，J 开炮，↑↓ 飞机俯仰，M 地图，Esc 设置。
+// 电脑：WASD 移动/驾驶，按住鼠标拖动转镜头，空格 攻击/手刹，F 上下车，Q 换武器，J 攻击/车上发火箭筒（坦克炮是空格或“开炮”键），↑↓ 飞机俯仰/直升机升降，M 地图，Esc 设置。
 import { el, toast, toggleFullscreen, store, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
 import { Joystick, ActionButton, DragPad } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
@@ -97,7 +97,7 @@ export class Hud {
     const ka = k.axis();
     if (ka.active) { jx = ka.x; jy = ka.y; }
     if (Math.hypot(jx, jy) < 0.16) { jx = 0; jy = 0; }
-    c.aimYaw = cy;
+    c.aimYaw = cy; c.aimSet = true;   // 界面每帧都写瞄准方向；车上发火箭筒时用它，没有它就用车头方向
     if (k.hit('KeyF')) c.enter = true;
     if (k.hit('KeyQ')) c.swap = true;
     if (k.hit('KeyM')) this.overlay ? this.closeOverlay() : this.openMap();
@@ -109,6 +109,7 @@ export class Hud {
       const fx = Math.sin(cy), fz = Math.cos(cy);
       c.mx = fx * -jy - fz * jx; c.mz = fz * -jy + fx * jx;
       c.fire = this.bAtk.pressed || k.isDown('Space', 'KeyJ');
+      c.rocket = false;   // 步行不发车载火箭，下车时不清会残留
       c.steer = 0; c.gas = 0; c.handbrake = false; c.pitch = 0;
       return;
     }
@@ -129,7 +130,9 @@ export class Hud {
     }
     c.gas = gas;
     c.handbrake = this.bHand.pressed || (k.isDown('Space') && v.spec.cls !== 'tank');
-    c.fire = this.bFire.pressed || k.isDown('KeyJ') || (v.spec.cls === 'tank' && k.isDown('Space'));
+    // 坦克：开炮键（bFire）或空格是坦克炮；其他车上开炮键（bFire）发火箭筒，J 键在所有车上都发火箭筒
+    c.fire = v.spec.cls === 'tank' && (this.bFire.pressed || k.isDown('Space'));
+    c.rocket = k.isDown('KeyJ') || (v.spec.cls !== 'tank' && this.bFire.pressed);
   }
 
   /* ---------------------------------------------------------- 事件 */
@@ -146,7 +149,7 @@ export class Hud {
       case 'stars': if (ev.up) { Sfx.play('siren'); if (ev.n === 1) this.showBanner('被通缉了', '甩掉警察的视线一阵子，星星就会消失', 'bad', 3); } else if (ev.n === 0) this.showBanner('通缉解除', '', 'good', 2); break;
       case 'wasted': Sfx.play('lose'); break;
       case 'respawn': toast(ev.fee ? `医药费 $${ev.fee}` : '你在医院醒来', 2500); break;
-      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆上下升降、油门前进，不用跑道就能原地起飞；降落要轻推，别满杆砸下来' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
+      case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆上下升降、油门前进，不用跑道就能原地起飞；轻推慢降能落平顶楼顶，J 键或“火箭”键发火箭筒' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹，J 键发火箭筒' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
       case 'refill': { this.wpEl.classList.remove('flash'); void this.wpEl.offsetWidth; this.wpEl.classList.add('flash'); setTimeout(() => this.wpEl.classList.remove('flash'), 700); break; }
       case 'hurt': Sfx.play('hurt', 0.25); this.root.classList.add('hurt'); clearTimeout(this._ht); this._ht = setTimeout(() => this.root.classList.remove('hurt'), 160); break;
       case 'mission':
@@ -197,7 +200,7 @@ export class Hud {
       const foot = !v;
       this.bAtk.show(foot); this.bSwap.show(foot);
       this.bGas.show(!foot); this.bBrake.show(!foot); this.bExit.show(!foot);
-      this.bHand.show(!foot && (cls === 'car' || cls === 'bike')); this.bFire.show(cls === 'tank');
+      this.bHand.show(!foot && (cls === 'car' || cls === 'bike')); this.bFire.show(!foot); this.bFire.setLabel(cls === 'tank' ? '开炮' : '火箭');   // 开炮键只在坦克上是开炮，其他车上是火箭筒
       this.bBrake.setLabel(cls === 'plane' || cls === 'heli' ? '减速' : cls === 'boat' ? '倒船' : '刹车');
     });
     set('atkIcon', p.weapon > 0, (x) => this.bAtk.setIcon(x ? IC.gun : IC.fist));
