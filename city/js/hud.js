@@ -500,5 +500,5 @@ export class Hud {
     el('div', { cls: 'set-tip', text: '操作：左下摇杆移动或转向，右半边屏幕拖动转镜头。开车时摇杆上下也能当油门和刹车。出生就带全部 6 种武器，数字键 1~6 或 Q 换武器，子弹打空自动补满。直升机在机场停机坪：摇杆上下升降、油门前进，不用跑道。电脑键位：WASD、鼠标拖动转镜头、空格 攻击/手刹、F 上下车、Q 换武器、J 开炮、方向键上下 飞机俯仰/直升机升降、M 地图。金钱和已完成的任务会自动保存在本机。' }, box);
   }
 
-  dispose() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this.net) { const n = this.net; this.net = null; this.sim.net = null; n.leave(); } if (this.engine) this.engine.stop(); store.set('city-save', this.sim.save()); this.root.innerHTML = ''; }
+  dispose() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this._netKbdDetach) { this._netKbdDetach(); this._netKbdDetach = null; } if (this.net) { const n = this.net; this.net = null; this.sim.net = null; n.leave(); } if (this.engine) this.engine.stop(); store.set('city-save', this.sim.save()); this.root.innerHTML = ''; }
 }

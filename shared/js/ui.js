@@ -101,14 +101,33 @@ export function leaveNoticeDue(seen, name, now = Date.now()) {
  * 而 HUD 的上下控件本来就按安全区（--st/--sb）留了边距。
  * 虚拟键盘是例外：键盘会盖住布局视口，那种情况由 attachKeyboardFit
  *（html.kbd 规则 + --vv-h）单独处理，和这里不冲突。
+ * 触发器（2026-11-22 竖屏底部黑边，根因）：只听 window 的 resize 不够——
+ * 工具栏收起/展开时，window 的 resize 可能在动画开始就触发、读到旧高度，
+ * 之后不再触发，--app-h 就钉死在工具栏出现时的矮值上，工具栏收起后底部露出底色。
+ * visualViewport 的 resize/scroll 会跟着可视区域一起变，是真正漏掉的事件源，
+ * 所以这里也听它；值仍读 window.innerHeight，visualViewport 只当触发器。
  */
 export function fitViewport() {
+  let cur = '';
   const set = () => {
-    document.documentElement.style.setProperty('--app-h', Math.round(window.innerHeight) + 'px');
+    const v = Math.round(window.innerHeight) + 'px';
+    if (v !== cur) { cur = v; document.documentElement.style.setProperty('--app-h', v); }
   };
+  // 每次触发后下一帧再读一次：动画中途读到的可能是中间值，多读一帧让它收敛到最终值。
+  const onChange = () => { set(); requestAnimationFrame(set); };
   set();
-  window.addEventListener('resize', set);
-  window.addEventListener('orientationchange', () => setTimeout(set, 150));
+  window.addEventListener('resize', onChange);
+  window.addEventListener('orientationchange', () => setTimeout(onChange, 150));
+  // 工具栏收起/展开时漏掉的事件源（2026-11-22 竖屏底部黑边，根因）：
+  // window 的 resize 可能在工具栏动画开始就触发、读到旧高度，之后不再触发，
+  // --app-h 就钉死在工具栏出现时的矮值上，工具栏收起后底部露出底色。
+  // visualViewport 的 resize/scroll 会跟着可视区域一起变；值仍读 window.innerHeight，
+  // visualViewport 只当触发器不当取值来源，键盘弹起时它变矮也不能把游戏区缩短
+  //（键盘由 attachKeyboardFit 单独处理）。
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onChange);
+    window.visualViewport.addEventListener('scroll', onChange);
+  }
 }
 
 /** 游戏页面通用：禁止双击缩放、长按菜单、文字选中、橡皮筋滚动；并让页面高度跟随可见区域 */

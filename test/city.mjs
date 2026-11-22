@@ -121,7 +121,9 @@ if (!quick) {
   check(r.running && r.speed > 18, `按住跑步跑起来了（${r.speed.toFixed(1)} 米/秒，约 3 倍步行）`, log);
   check(Math.abs(r.left - 39) < 1, `跑 1 秒扣 1 秒预算（剩 ${r.left.toFixed(1)} 秒）`, log);
   await freeze();
-  await sleep(600);   // 等 HUD 刷新角标（0.1 秒一刷）
+  // 等角标真的刷到 39s 再读：HUD 是 0.1 秒一刷，无头下帧率低，固定睡 600 毫秒有时读早了
+  //（角标还是初始的 40s），和武器切换那处一样改成等条件而不是等固定时间。
+  await page.waitForFunction(`window.__city.hud.bRun.badgeEl.textContent === '39s'`, { timeout: 5000 }).catch(() => {});
   r = await runState();
   check(r.badge === '39s', `跑步键角标显示剩余 39s（实测“${r.badge}”）`, log);
   // 跑满 40 秒扣空：每 0.5 秒传回原地（往北跑 30 秒会进河，水里不跑也不回桶），一锁死就停——不停的话锁死后每 chunk 还在走路回桶
@@ -161,11 +163,14 @@ if (!quick) {
       const out = { base: full(), toolbar: null, restored: null, hud: null };
       if (window.innerHeight > window.innerWidth) {
         const fake = { width: window.innerWidth, height: Math.round(window.innerHeight * 0.83), offsetTop: Math.round(window.innerHeight * 0.08), offsetLeft: 0, scale: 1, addEventListener() {}, removeEventListener() {}, onresize: null, onscroll: null };
+        const realVV = window.visualViewport;   // 先存真 visualViewport
         Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
         window.dispatchEvent(new Event('resize'));
         await new Promise((r) => setTimeout(r, 150));
         out.toolbar = full();
-        delete window.visualViewport;   // 恢复原型上的真 visualViewport
+        // 直接 delete 恢复不了：visualViewport 是 window 自身的访问器属性，
+        // 删掉影子属性后它就是 undefined（2026-11-22 实测），必须用存下的真对象贴回去。
+        Object.defineProperty(window, 'visualViewport', { value: realVV, configurable: true });
         window.dispatchEvent(new Event('resize'));
         await new Promise((r) => setTimeout(r, 150));
         out.restored = full();
@@ -183,6 +188,50 @@ if (!quick) {
       check(cover.toolbar, `${name} 模拟手机工具栏（visualViewport 变矮）后画布仍铺满`, log);
       check(cover.restored, `${name} 工具栏消失后画布恢复铺满`, log);
       check(cover.hud, `${name} 竖屏 HUD 控件（摇杆/开火/跑步/换武器）全部在视口内`, log);
+      // 工具栏收起（2026-11-22 底部黑边根因）：innerHeight 变回全高，但只触发
+      // visualViewport 事件、不触发 window resize——真机上 window resize 可能在
+      // 工具栏动画开始就触发、读到旧高度。fitViewport 必须听 visualViewport 的
+      // resize/scroll 才能跟上；这里把 innerHeight 影子化来模拟，只留 vv 事件。
+      const collapse = await page.evaluate(async () => {
+        const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+        const origH = window.innerHeight;
+        const vv = window.visualViewport;   // 真 visualViewport（前面的 cover 检查已把它恢复好）
+        // innerHeight 是 window 自身的访问器属性：直接 delete 会把它整个删掉、
+        // 之后读到 undefined（2026-11-22 实测），所以先存描述符、用它恢复。
+        const ihDesc = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+        const appH = () => getComputedStyle(document.documentElement).getPropertyValue('--app-h').trim();
+        const full = () => { const c = document.querySelector('canvas.g-canvas'); if (!c) return false; const b = c.getBoundingClientRect(); return Math.abs(b.x) <= 1 && Math.abs(b.y) <= 1 && Math.abs(b.width - window.innerWidth) <= 1 && Math.abs(b.height - window.innerHeight) <= 1; };
+        const shrink = Math.round(origH * 0.83);
+        const out = { vvExists: !!vv };
+        if (!vv) return out;
+        // 收起路径 1：只触发 visualViewport resize
+        Object.defineProperty(window, 'innerHeight', { value: shrink, configurable: true });
+        window.dispatchEvent(new Event('resize'));
+        await sleep2(150);
+        out.shrunk = appH() === shrink + 'px';
+        Object.defineProperty(window, 'innerHeight', { value: origH, configurable: true });
+        vv.dispatchEvent(new Event('resize'));
+        await sleep2(200);
+        out.vvResize = full();
+        // 收起路径 2：只触发 visualViewport scroll（工具栏收起时 offsetTop 也会变）
+        Object.defineProperty(window, 'innerHeight', { value: shrink, configurable: true });
+        window.dispatchEvent(new Event('resize'));
+        await sleep2(150);
+        Object.defineProperty(window, 'innerHeight', { value: origH, configurable: true });
+        vv.dispatchEvent(new Event('scroll'));
+        await sleep2(200);
+        out.vvScroll = full();
+        Object.defineProperty(window, 'innerHeight', ihDesc);   // 用存下的描述符恢复真 innerHeight
+        window.dispatchEvent(new Event('resize'));
+        await sleep2(150);
+        out.restored = full();
+        return out;
+      });
+      check(collapse.vvExists, `${name} 真 visualViewport 可用`, log);
+      check(collapse.shrunk, `${name} 模拟工具栏出现后 --app-h 跟着变矮`, log);
+      check(collapse.vvResize, `${name} 工具栏收起（只触发 visualViewport resize）后画布恢复铺满`, log);
+      check(collapse.vvScroll, `${name} 工具栏收起（只触发 visualViewport scroll）后画布恢复铺满`, log);
+      check(collapse.restored, `${name} 恢复真实 innerHeight 后画布仍铺满`, log);
     }
     // 出生全武器：数字键 1~6 直接切
     const spawn = await page.evaluate(() => { const p = window.__city.sim.player; return { owned: p.owned.slice(), ammo: p.ammo.slice() }; });
