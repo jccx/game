@@ -40,7 +40,7 @@ function buildList(w) {
     },
     {
       id: 'boat', name: '水上追风', icon: '艇', type: 'checkpoints', reward: 700, at: [px, pier.z1 - 5],
-      desc: '驾驶快艇绕海湾一圈。', vehicle: 'boat', spawn: [px + 11, pier.z1 - 2, Math.PI], time: 60, cpTime: 20,
+      desc: '驾驶快艇绕海湾一圈。', vehicle: 'boat', spawn: [px + 9, pier.z1 - 2, Math.PI], time: 60, cpTime: 20,   // 任务船也系在码头边 4 米内，站在码头边就能上船（2026-11-21：原来是 11 米，够不着）
       cps: [sea(-20), sea(-55), sea(-95), sea(-55, 90), sea(-10, 80), sea(30, 60), sea(15)],
     },
     {

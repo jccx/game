@@ -48,6 +48,8 @@ export class View {
 
     // ---- 载具、拾取物、任务标记 ----
     this.vehViews = new Map(); this.pickViews = new Map(); this._seen = new Set();
+    // ---- 联机：远端玩家的人物和名字标签（uid -> {parts, label, lx, lz, phase}，最多同时画 8 个最近的）----
+    this.remoteViews = new Map();
     const blob = blobShadow();
     this.shadows = new THREE.InstancedMesh(blob.geo, blob.mat, MAX_SHADOW);
     this.shadows.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.shadows.frustumCulled = false; this.shadows.renderOrder = 2; this.shadows.count = 0;
@@ -87,7 +89,7 @@ export class View {
     this.scene.fog.near = this.far * 0.3; this.scene.fog.far = this.far;
   }
 
-  /** 有楼被炸平后重建静态场景（废墟代替楼）。全量重建只在炸楼时触发一次；重建用同一个随机种子，所以树和屋顶颜色和原来一样 */
+  /** 有楼被炸平或重建后重建静态场景（废墟代替楼，或楼回来废墟消失）。全量重建只在炸楼/重建时触发一次；重建用同一个随机种子，所以树和屋顶颜色和原来一样 */
   rebuildScene() {
     this.world.dispose();
     this.world = buildScene(this.sim.world, this.scene, this.stage.level >= 2);
@@ -139,7 +141,21 @@ export class View {
         const cx = (ev.b.x0 + ev.b.x1) / 2, cz = (ev.b.z0 + ev.b.z1) / 2;
         this.smoke.emit(cx, ev.b.y0 + 2, cz, { n: 24, speed: [2, 8], dir: [0, 1, 0], spread: 0.9, life: [1.0, 2.0], size: [2, 3.5], grow: 1.2, color: 0x6a6258, alpha: 0.6, drag: 1, r: 2 });
         this.fire.emit(cx, ev.b.y0 + 2, cz, { n: 16, speed: [2, 8], life: [0.3, 0.7], size: [1, 2.4], color: 0xff8a20, color2: 0xfff0a0, gravity: -6 });
-        this.shake = Math.max(this.shake, 0.7);
+        if (!ev.remote) this.shake = Math.max(this.shake, 0.7);   // 远端炸的楼不震自己的镜头
+        break;
+      }
+      case 'buildingUp': {
+        // 楼重建了：静态场景也要重建回来，扬点尘，不震镜头
+        this.needRebuild = true;
+        const cx = (ev.b.x0 + ev.b.x1) / 2, cz = (ev.b.z0 + ev.b.z1) / 2;
+        this.smoke.emit(cx, ev.b.y0 + 2, cz, { n: 10, speed: [1, 3], dir: [0, 1, 0], spread: 0.9, life: [0.8, 1.4], size: [1.5, 3], grow: 1.2, color: 0x9a938a, alpha: 0.5, drag: 1, r: 2 });
+        break;
+      }
+      case 'buildingUp': {
+        // 楼重建了：下个逻辑帧重建一次静态场景（楼回来，废墟消失）。和 buildingDown 一样，一帧最多重建一次
+        this.needRebuild = true;
+        const cx = (ev.b.x0 + ev.b.x1) / 2, cz = (ev.b.z0 + ev.b.z1) / 2;
+        this.smoke.emit(cx, ev.b.y0 + 2, cz, { n: 10, speed: [1, 4], dir: [0, 1, 0], spread: 0.9, life: [0.8, 1.5], size: [2, 3], grow: 1.2, color: 0x8a8578, alpha: 0.5, drag: 1, r: 2 });
         break;
       }
       case 'crash':
@@ -152,7 +168,7 @@ export class View {
         if (near(ev.x, ev.z, 80)) Sfx.play('splash', 0.2);
         break;
       case 'hit': this.smoke.emit(ev.x, ev.y, ev.z, { n: 4, speed: [1, 3], life: [0.2, 0.45], size: [0.3, 0.6], grow: 1.8, color: 0xf0e8e0, alpha: 0.75 }); break;
-      case 'shot': if (ev.mine || near(ev.x, ev.z, 70)) Sfx.play(ev.w === 'rocket' || ev.w === 'shell' ? 'boost' : 'shoot', 0.05); break;
+      case 'shot': if (ev.mine || near(ev.x, ev.z, 70)) Sfx.play(ev.w === 'rocket' || ev.w === 'fireworks' || ev.w === 'shell' ? 'boost' : 'shoot', 0.05); break;
       case 'punch': if (near(ev.x, ev.z, 30)) Sfx.play('slash', 0.1); break;
     }
     this.onEvent(ev);
@@ -220,6 +236,7 @@ export class View {
     this.nShadow = 0;
     this.updatePlayer(p, lx, ly, lz, dt);
     this.updatePeds(alpha);
+    this.updateRemotePlayers(alpha, dt);
     this.updateVehicles(alpha, dt);
     this.updateMarkers(dt);
 
@@ -304,6 +321,67 @@ export class View {
     for (const k in pd) { const m = pd[k]; m.count = n; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
   }
 
+  /** 联机：画远端玩家（和本地玩家同一套部件，各自是独立网格，省得和行人的实例化网格抢名额） */
+  updateRemotePlayers(alpha, dt) {
+    const net = this.sim.net;
+    const rps = net ? net.remotePlayers : null;
+    const p = this.sim.player;
+    if (!rps || rps.size === 0) {
+      if (this.remoteViews.size) for (const [uid, vw] of this.remoteViews) this.dropRemoteView(uid, vw);
+      return;
+    }
+    // 只画最近的 8 个
+    const list = [...rps.entries()]
+      .map(([uid, rp]) => [uid, rp, Math.hypot(rp.x - p.x, rp.z - p.z)])
+      .sort((a, b) => a[2] - b[2]).slice(0, 8);
+    const keep = new Set(list.map(([uid]) => uid));
+    for (const [uid, vw] of this.remoteViews) if (!keep.has(uid)) this.dropRemoteView(uid, vw);
+    for (const [uid, rp, dist] of list) {
+      let vw = this.remoteViews.get(uid);
+      if (!vw) { vw = this.makeRemoteFigure(uid, rp.name); this.remoteViews.set(uid, vw); }
+      const x = rp.px + (rp.x - rp.px) * alpha, z = rp.pz + (rp.z - rp.pz) * alpha, y = rp.py + (rp.y - rp.py) * alpha;
+      // 走路摆臂：按这帧实际移动的速度算
+      const sp = dt > 0 ? Math.hypot(x - vw.lx, z - vw.lz) / dt : 0;
+      vw.lx = x; vw.lz = z;
+      let aL = 0, aR = 0, lL = 0, lR = 0;
+      if (sp > 0.5) { vw.phase += dt * 11; const s = Math.sin(vw.phase); lL = s * 0.85; lR = -s * 0.85; aL = -s * 0.6; aR = s * 0.6; }
+      if (rp.weapon > 0) aR = -1.5;   // 拿着枪
+      this.pose(x, y, z, rp.yaw, 0, 0, aL, aR, lL, lR, (name, m) => { vw.parts[name].matrix.copy(m); if (name === 'armR') vw.parts.gun.matrix.copy(m); });
+      vw.parts.gun.visible = rp.weapon > 0;
+      this.addShadow(x, y, z, 1.4);
+      // 名字标签：250 米内、镜头前才显示
+      const s = this.project(x, y + 2.6, z);
+      const show = s.visible && dist < 250;
+      if (show !== vw.shown) { vw.shown = show; vw.label.style.display = show ? 'block' : 'none'; }
+      if (show) vw.label.style.transform = `translate3d(${s.x.toFixed(0)}px,${s.y.toFixed(0)}px,0) translate(-50%,-50%)`;
+    }
+  }
+
+  makeRemoteFigure(uid, name) {
+    const parts = personParts();
+    const pm = (geo, color) => { const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, color, flatShading: true })); m.matrixAutoUpdate = false; this.scene.add(m); return m; };
+    // 衣服颜色按 uid 散开，每个人一眼能分清
+    const PALETTE = [0x4ade80, 0x5ab8ff, 0xffb347, 0xc05cff, 0xff6a6a, 0xffe066, 0x4ae0ff, 0xff8ad8];
+    let h = 0; for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) >>> 0;
+    const shirt = PALETTE[h % PALETTE.length], skin = SKIN[h % SKIN.length];
+    const vw = {
+      parts: {
+        torso: pm(parts.torso, shirt), head: pm(parts.head, skin), hair: pm(parts.hair, 0x24303f),
+        armL: pm(parts.arm, shirt), armR: pm(parts.arm, shirt),
+        legL: pm(parts.leg, 0x3a3f4a), legR: pm(parts.leg, 0x3a3f4a), gun: pm(parts.gun, 0xffffff),
+      },
+      label: el('div', { cls: 'wlabel net-name', text: name }, this.layer),
+      lx: 0, lz: 0, phase: 0, shown: false,
+    };
+    return vw;
+  }
+
+  dropRemoteView(uid, vw) {
+    for (const k in vw.parts) { this.scene.remove(vw.parts[k]); vw.parts[k].geometry.dispose(); vw.parts[k].material.dispose(); }
+    vw.label.remove();
+    this.remoteViews.delete(uid);
+  }
+
   updateVehicles(alpha, dt) {
     const sim = this.sim, seen = this._seen, t = this.time;
     seen.clear();
@@ -362,7 +440,7 @@ export class View {
       g.mesh.material.opacity = 0.25 + 0.12 * Math.sin(t * 3);
       let lab = false;
       if (vis && d < 90) { const s = this.project(g.m.at[0], g.mesh.position.y - 9, g.m.at[1]); if (s.visible) { lab = true; g.label.style.transform = `translate3d(${s.x.toFixed(0)}px,${s.y.toFixed(0)}px,0) translate(-50%,-50%)`; } }
-      if (lab !== g.shown) { g.shown = lab; g.label.style.display = lab ? '' : 'none'; }
+      if (lab !== g.shown) { g.shown = lab; g.label.style.display = lab ? 'block' : 'none'; }
     }
     const hud = ms.hud, ring = hud && hud.ring, tg = hud && hud.target;
     this.cpBeam.visible = !!ring && ring.y === null; this.cpRing.visible = !!ring && ring.y !== null;
@@ -379,6 +457,7 @@ export class View {
   dispose() {
     this.world.dispose();
     for (const g of this.givers) g.label.remove();
+    for (const [uid, vw] of this.remoteViews) this.dropRemoteView(uid, vw);
     this.scene.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose?.(); });
   }
 }

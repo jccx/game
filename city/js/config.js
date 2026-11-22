@@ -42,15 +42,16 @@ export const WEAPONS = [
   { id: 'pistol',  name: '手枪',   dmg: 22, rate: 10, range: 55, spread: 0.02 },
   { id: 'smg',     name: '冲锋枪', dmg: 13, rate: 10, range: 50, spread: 0.05 },
   { id: 'shotgun', name: '霰弹枪', dmg: 11, pellets: 7, rate: 10, range: 24, spread: 0.11 },
-  { id: 'rocket',  name: '火箭筒', dmg: 320, rate: 10, range: 130, explosive: true, radius: 7, speed: 55 },
+  { id: 'rocket',    name: '火箭筒', dmg: 320, rate: 10, range: 130, explosive: true, radius: 7, speed: 55 },
+  { id: 'fireworks', name: '烟花', dmg: 320, rate: 10, range: 130, explosive: true, radius: 7, speed: 55 },   // 2026-11-21：每轮同时向 8 个方向齐射（瞄准方向 + k*45 度），每轮只耗 1 发弹药，见 sim.js playerAttack()
 ];
 export const WEAPON_INDEX = Object.fromEntries(WEAPONS.map((w, i) => [w.id, i]));
 
 /**
  * 每种武器的初始子弹数（拳头无限）。出生和子弹打空自动补满都补到这个数。
- * 手枪 80 是原来的出生子弹数；冲锋枪 150、霰弹枪 24、火箭筒 6 与 sim.js 里拾取武器的补给量相同。
+ * 手枪 80 是原来的出生子弹数；冲锋枪 150、霰弹枪 24、火箭筒 6 与 sim.js 里拾取武器的补给量相同；烟花 是 4（一梭子 4 发，一轮齐射只耗 1 发）。
  */
-export const AMMO = [Infinity, 80, 150, 24, 6];
+export const AMMO = [Infinity, 80, 150, 24, 6, 4];
 
 /** 玩家 */
 export const PLAYER = { speed: 6.5, swim: 2.6, radius: 0.45, hp: 100, enterDist: 4.2, pickupDist: 1.8 };

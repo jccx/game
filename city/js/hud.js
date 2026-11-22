@@ -10,7 +10,8 @@ import { fmtTime, clamp } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
 import { WEAPONS, VEH } from './config.js';
 import { SIZE, RUNWAY, BASE } from './world.js';
-import { paintMap } from './render/scene.js';
+import { paintMap, mapBuildingColor } from './render/scene.js';
+import { Net, validName } from './net.js';
 
 const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const IC = {
@@ -23,6 +24,7 @@ const IC = {
   brake: svg('<path d="M12 4v15M5 12l7 7 7-7"/>'),
   hand: svg('<circle cx="12" cy="12" r="8"/><path d="M12 8v5M12 16v.5"/>'),
   fire: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>'),
+  net: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15.5 0 18M12 3c-2.5 2.5-2.5 15.5 0 18"/>'),
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'),
 };
 
@@ -36,6 +38,7 @@ export class Hud {
   constructor(root, sim, view, api) {
     this.root = root; this.sim = sim; this.view = view; this.api = api; this.keys = api.keys;
     this.c = {}; this.slowT = 0; this.mapT = 0; this.bannerT = 0; this.engine = null; this.saveT = 5;
+    this.net = null;   // 联机：没加入时是 null，单机完全不受影响
     this.mapImg = paintMap(sim.world, 512);
     root.innerHTML = '';
     this.build();
@@ -54,7 +57,9 @@ export class Hud {
     this.cheat = makeCheatButton(row, { get: () => this.sim.player.godT > 0, onToggle: () => this.toggleGod() });
     this.cheatEl = this.cheat.el;
     this.moneyEl = el('div', { cls: 'money', text: '$0' }, row);
+    this.netBtn = el('div', { cls: 'g-ic', html: IC.net, on: { pointerdown: (e) => { e.preventDefault(); this.openNet(); } } }, row);
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
+    this.netEl = el('div', { cls: 'net-status', text: '' }, right);   // 联机状态：单机时不显示
     this.starsEl = el('div', { cls: 'stars' }, right);
     const bars = el('div', { cls: 'c-bars' }, right);
     this.hpEl = el('i', {}, el('div', { cls: 'c-hp' }, bars)); this.arEl = el('i', {}, el('div', { cls: 'c-ar' }, bars));
@@ -103,7 +108,7 @@ export class Hud {
     if (k.hit('KeyM')) this.overlay ? this.closeOverlay() : this.openMap();
     if (k.hit('Escape')) this.overlay ? this.closeOverlay() : this.openSettings();
     if (!v) {
-      // 步行：数字键 1~5 直接切到任意一种武器（出生就全拥有，不用解锁）
+      // 步行：数字键 1~6 直接切到任意一种武器（出生就全拥有，不用解锁）
       for (let i = 0; i < WEAPONS.length; i++) if (k.hit('Digit' + (i + 1))) sim.selectWeapon(i);
       // 步行：摇杆方向是相对镜头的。镜头朝向 (sin, cos)，屏幕右方是 (-cos, sin)
       const fx = Math.sin(cy), fz = Math.cos(cy);
@@ -166,6 +171,13 @@ export class Hud {
         toast(`${b.name || '建筑'}被炸平了`);
         break;
       }
+      case 'buildingUp': {
+        const b = ev.b, k = this.mapImg.width / SIZE;
+        this.mapImg.getContext('2d').fillStyle = mapBuildingColor(this.sim.world, b);   // 小地图上恢复成楼的颜色（地标金色）
+        this.mapImg.getContext('2d').fillRect(b.x0 * k, b.z0 * k, (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+        this._mapDirty = true;   // 多栋楼同时重建时，攒到 slow() 里整张重画一次
+        break;   // “XX已重建”的提示由 sim.js 在 150 米内节流着发，不在这里重复弹
+      }
       case 'respawn': toast(ev.fee ? `医药费 $${ev.fee}` : '你在医院醒来', 2500); break;
       case 'enter': Sfx.play('click'); toast(`${VEH[ev.v.type].name}${ev.v.spec.cls === 'plane' ? '：按住油门加速，速度够了把摇杆往上推就能起飞' : ev.v.spec.cls === 'heli' ? '：摇杆前后左右飞，“上升/下降”按钮升降，不用跑道就能原地起飞；轻推慢降能落平顶楼顶，J 键或“火箭”键发火箭筒' : ev.v.spec.cls === 'tank' ? '：可以原地转向，“开炮”键发射炮弹，J 键发火箭筒' : ''}`, ev.v.spec.cls === 'plane' || ev.v.spec.cls === 'heli' ? 4500 : 2200); break;
       case 'refill': { this.wpEl.classList.remove('flash'); void this.wpEl.offsetWidth; this.wpEl.classList.add('flash'); setTimeout(() => this.wpEl.classList.remove('flash'), 700); break; }
@@ -187,6 +199,7 @@ export class Hud {
   /* ---------------------------------------------------------- 每帧更新 */
   update(dt) {
     const sim = this.sim, p = sim.player, v = p.inVeh;
+    if (this.net) this.net.update(dt);   // 联机心跳和广播（暂停时也在跑：render 每帧都调这里）
     // 拖动转镜头
     const d = this.pad.consume();
     this.view.look(d.dx, d.dy);
@@ -211,6 +224,14 @@ export class Hud {
     const wp = WEAPONS[p.weapon];
     set('wp', wp.name + (wp.melee ? '' : ' ' + p.ammo[p.weapon]), (x) => { this.wpEl.textContent = x; });
     set('god', p.godT > 0, (x) => this.cheat.sync(x));
+    // 联机状态：单机不显示；在线显示人数
+    const net = this.net;
+    set('net', !net ? '' : net.status === 'connecting' ? '连接中…' : net.status === 'online' ? `联机 ${1 + net.remotePlayers.size} 人` : net.status === 'failed' ? '联机未连接' : '', (x) => {
+      this.netEl.textContent = x; this.netEl.style.display = x ? '' : 'none';
+      this.netEl.classList.toggle('on', !!net && net.status === 'online');
+    });
+    // 有楼重建过：小地图攒到这里一次重画
+    if (this._mapDirty) { this._mapDirty = false; this.mapImg = paintMap(sim.world, 512); }
     set('dead', p.dead, (x) => { this.wasted.classList.toggle('show', x); });
     // 走近地标时报名字（每栋一局只报一次）
     if (!v) {
@@ -262,6 +283,8 @@ export class Hud {
       x.fillStyle = color; x.beginPath(); x.arc(S / 2 + dx, S / 2 + dz, r, 0, 6.283); x.fill(); x.lineWidth = 1; x.strokeStyle = '#000'; x.stroke();
     };
     for (const o of sim.peds) if (o.alive && o.kind !== 'civ') blip(o.x, o.z, o.kind === 'cop' ? '#4a8cff' : '#c05cff', 3);
+    // 联机：别的玩家是绿点
+    if (sim.net) for (const rp of sim.net.remotePlayers.values()) blip(rp.x, rp.z, '#4ade80', 4);
     for (const v of sim.vehicles) if (v.alive && v.ai && v.ai.kind === 'chase') blip(v.x, v.z, ((sim.time * 4) | 0) % 2 ? '#ff4a4a' : '#4a8cff', 4);
     for (const kx of sim.pickups) if (kx.t <= 0 && kx.fixed) blip(kx.x, kx.z, kx.type === 'health' ? '#ff6a6a' : kx.type === 'star' ? '#ffe066' : kx.type === 'armor' ? '#6ab8ff' : '#ffb347', 2.5);
     const h = sim.missions.hud;
@@ -281,7 +304,7 @@ export class Hud {
   }
 
   /* ---------------------------------------------------------- 弹出面板 */
-  closeOverlay() { if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
+  closeOverlay() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
   openOverlay(cls) {
     this.closeOverlay();
     this.overlay = el('div', { cls: 'g-overlay ' + cls }, this.root);
@@ -304,11 +327,88 @@ export class Hud {
     tag(P.pier.x0 + 5, P.pier.z1 + 26, '码头', '#d9b98a'); tag(P.hospital.x, P.hospital.z - 22, '医院', '#ffb0b0'); tag(430, 430, '山', '#e8e8e8');
     for (const m of sim.missions.list) tag(m.at[0], m.at[1], m.icon + (sim.missions.done.has(m.id) ? '✓' : ''), sim.missions.done.has(m.id) ? '#b0a060' : '#ffd84a');
     for (const b of sim.world.buildings) if (b.kind === 'landmark') tag((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, b.destroyed ? b.name + '（已炸平）' : b.name, b.destroyed ? '#8a8578' : '#d8a020');
+    // 联机：别的玩家是绿点
+    if (sim.net) for (const rp of sim.net.remotePlayers.values()) { x.fillStyle = '#4ade80'; x.beginPath(); x.arc(rp.x * k, rp.z * k, 6, 0, 6.283); x.fill(); x.lineWidth = 2; x.strokeStyle = '#000'; x.stroke(); }
     x.translate(p.x * k, p.z * k); x.rotate(-p.yaw + Math.PI);
     x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, -12); x.lineTo(9, 10); x.lineTo(0, 5); x.lineTo(-9, 10); x.closePath(); x.fill(); x.stroke();
     const list = el('div', { cls: 'mlist g-scroll' }, body);
     for (const m of sim.missions.list) el('div', { cls: 'mrow' + (sim.missions.done.has(m.id) ? ' done' : ''), html: `<i>${m.icon}</i><div><b>${m.name}　$${m.reward}</b><span>${m.desc}</span></div>` }, list);
     el('button', { cls: 'g-b', text: '关闭', on: { click: () => this.closeOverlay() } }, box);
+  }
+
+  /* ---------------------------------------------------------- 联机 */
+  netEvent(ev) {
+    switch (ev.type) {
+      case 'playerJoin': toast(`${ev.name}加入了落日湾`); break;
+      case 'playerLeave': toast(`${ev.name}离开了`); break;
+      case 'syncBlocked': toast(`联机同步被拒绝了（${ev.what}），请检查数据库规则`, 3000); break;
+    }
+  }
+
+  /** 联机面板：输名字、加入、看在线的人、断开 */
+  openNet() {
+    const box = this.openOverlay('cnet');
+    el('div', { cls: 'cbox-head', html: '<b>联机模式</b><span>所有玩家共享同一张地图</span>' }, box);
+    const saved = store.get('city-net-name', '');
+    const row = el('div', { cls: 'net-row' }, box);
+    const input = el('input', { cls: 'net-input', attrs: { type: 'text', maxlength: '20', placeholder: '输入你的名字（1~20 个字）', value: saved } }, row);
+    const joinBtn = el('button', { cls: 'g-b', text: '加入联机' }, row);
+    const status = el('div', { cls: 'net-err', text: '' }, box);
+    const list = el('div', { cls: 'net-players' }, box);
+    const refresh = () => {
+      const net = this.net;
+      const names = net && net.status === 'online'
+        ? [net.name + '（你）', ...[...net.remotePlayers.values()].map((rp) => rp.name)]
+        : [];
+      list.innerHTML = names.length
+        ? `<b>在线 ${names.length} 人</b>` + names.map((n) => `<div>${n}</div>`).join('')
+        : '还没加入联机。加入后，你的位置、炸掉的楼、开着的车都会同步给其他玩家。';
+      joinBtn.textContent = net && net.status === 'online' ? '断开联机' : '加入联机';
+    };
+    refresh();
+    this._netRefresh = setInterval(refresh, 1000);
+    const close = () => { clearInterval(this._netRefresh); this._netRefresh = null; this.closeOverlay(); };
+    joinBtn.addEventListener('click', async () => {
+      if (this.net && this.net.status === 'online') { await this.leaveNet(); refresh(); return; }
+      const r = await this.joinNet(input.value);
+      if (r.ok) { status.textContent = ''; refresh(); }
+      else { status.textContent = r.message || '加入失败'; refresh(); }
+    });
+    el('button', { cls: 'g-b ghost', text: '关闭', on: { click: close } }, box);
+    el('div', { cls: 'set-tip', text: '名字只要和同时在线的人不重名就行。行人、交通车、警察、任务和子弹是各玩各的，不同步。断网或数据库没连上时，游戏照常单机玩。' }, box);
+    input.focus();
+  }
+
+  /** 加入联机（测试也直接调这个）。返回 {ok:true} 或 {ok:false, reason, message} */
+  async joinNet(rawName) {
+    if (this.net && this.net.status === 'online') return { ok: true };
+    const v = validName(rawName);
+    if (!v.ok) return { ok: false, reason: 'badname', message: v.reason };
+    let transport;
+    try {
+      const mod = await import('./net-firebase.js');   // SDK 只在这里动态加载，单机玩不碰网络
+      transport = await mod.createFirebaseTransport();
+    } catch (e) {
+      console.error('[net] firebase load failed', e);
+      return { ok: false, reason: 'offline', message: '联机加载失败（网络不通？），单机继续玩' };
+    }
+    const net = new Net(this.sim, transport, { onEvent: (ev) => this.netEvent(ev) });
+    this.net = net; this.sim.net = net;
+    const r = await net.join(v.name);
+    if (r.ok) {
+      store.set('city-net-name', v.name);
+      toast(`已加入联机：${v.name}`);
+    } else {
+      this.net = null; this.sim.net = null;
+    }
+    return r;
+  }
+
+  async leaveNet() {
+    const net = this.net;
+    this.net = null; this.sim.net = null;
+    if (net) await net.leave();
+    toast('已断开联机，回到单机');
   }
 
   openSettings() {
@@ -322,8 +422,8 @@ export class Hud {
     el('button', { cls: 'g-b ghost', text: '全屏', on: { click: () => toggleFullscreen() } }, f);
     el('button', { cls: 'g-b ghost', text: '清除存档重来', on: { click: () => { store.set('city-save', null); this.closeOverlay(); this.api.restart(); } } }, f);
     el('a', { cls: 'g-b ghost', text: '返回大厅', attrs: { href: '../' } }, f);
-    el('div', { cls: 'set-tip', text: '操作：左下摇杆移动或转向，右半边屏幕拖动转镜头。开车时摇杆上下也能当油门和刹车。出生就带全部 5 种武器，数字键 1~5 或 Q 换武器，子弹打空自动补满。直升机在机场停机坪：摇杆上下升降、油门前进，不用跑道。电脑键位：WASD、鼠标拖动转镜头、空格 攻击/手刹、F 上下车、Q 换武器、J 开炮、方向键上下 飞机俯仰/直升机升降、M 地图。金钱和已完成的任务会自动保存在本机。' }, box);
+    el('div', { cls: 'set-tip', text: '操作：左下摇杆移动或转向，右半边屏幕拖动转镜头。开车时摇杆上下也能当油门和刹车。出生就带全部 6 种武器，数字键 1~6 或 Q 换武器，子弹打空自动补满。直升机在机场停机坪：摇杆上下升降、油门前进，不用跑道。电脑键位：WASD、鼠标拖动转镜头、空格 攻击/手刹、F 上下车、Q 换武器、J 开炮、方向键上下 飞机俯仰/直升机升降、M 地图。金钱和已完成的任务会自动保存在本机。' }, box);
   }
 
-  dispose() { if (this.engine) this.engine.stop(); store.set('city-save', this.sim.save()); this.root.innerHTML = ''; }
+  dispose() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this.net) { const n = this.net; this.net = null; this.sim.net = null; n.leave(); } if (this.engine) this.engine.stop(); store.set('city-save', this.sim.save()); this.root.innerHTML = ''; }
 }

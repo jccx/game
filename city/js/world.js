@@ -130,7 +130,7 @@ export class World {
 
   addBuilding(x0, z0, x1, z1, h, kind, color, roof = 0, y0 = CITY_Y, opts = {}) {
     const hp = opts.hp ?? this.defaultHp(kind, h);
-    this.buildings.push({ x0, z0, x1, z1, y0, h, kind, color, roof, name: opts.name ?? null, note: opts.note ?? null, hp, maxHp: hp, destroyed: false });
+    this.buildings.push({ x0, z0, x1, z1, y0, h, kind, color, roof, name: opts.name ?? null, note: opts.note ?? null, hp, maxHp: hp, destroyed: false, rebuildAt: 0 });   // rebuildAt：被炸平后定好的重建时刻（游戏时间），0 表示没在等重建
   }
 
   /** 世界知名地标：8 栋，固定放在市中心 downtown（位置见 README）。形状在 render/scene.js 里按 name 拼。 */
@@ -245,7 +245,7 @@ export class World {
       spawn: { x: GX0 + 5 * PITCH + 10, z: GZ0 + 7 * PITCH + 22, face: -Math.PI / 2 },     // 住宅区的人行道上
       hospital: { x: GX0 + 7 * PITCH + 9.5, z: GZ0 + 6 * PITCH + 9.5 },
       pier: { x0: px - 5, x1: px + 5, z0: GZ0 + 12 * PITCH + ROAD / 2, z1: pz + 16 },
-      boats: [[px - 11, pz + 6, 0], [px + 11, pz + 8, 0], [px - 11, pz + 15, 0]],        // 船头朝南（朝海）
+      boats: [[px - 9, pz + 6, 0], [px + 9, pz + 8, 0], [px - 9, pz + 15, 0]],        // 船头朝南（朝海）；离码头边 4 米，在上车判定（中心距 5.4 米）内，站在码头边就能上船（2026-11-21：原来是 11 米，码头边上按上车永远够不着）
       planes: [[RUNWAY.x, RUNWAY.z1 - 14, Math.PI], [AIRPORT[2] - 76, AIRPORT[1] + 40, -Math.PI / 2]],
       helis: [[1210, 760, 0]],          // 机场停机坪：跑道西侧空地（地面平坦，无建筑），不用跑道就能原地起飞
       tanks: [[BASE[2] - 60, BASE[1] + 80, Math.PI], [BASE[2] - 46, BASE[1] + 80, Math.PI]],

@@ -41,9 +41,10 @@ export class Vehicle {
   /** 还能不能上车 */
   get usable() { return this.alive && !this.burning; }
 
-  /** 受到伤害。耐久归零后先起火，几秒后爆炸 */
+  /** 受到伤害。耐久归零后先起火，几秒后爆炸。主角当前坐着的车无敌：和主角无敌状态一样，任何伤害都不掉血 */
   damage(n, byPlayer = false) {
     if (!this.alive || n <= 0) return;
+    if (this.driver === 'player') return;   // 主角的座驾炸不坏：火箭弹、坦克炮、爆炸、撞车都不掉血
     this.hp -= n;
     if (byPlayer) this.byPlayer = true;
     if (this.hp <= 0 && !this.burning) {

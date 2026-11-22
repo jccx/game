@@ -184,17 +184,17 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
 }
 // ---- 9) 出生全武器、子弹自动补满、直升机、行人密度（2026-11-21） ----
 {
-  // 出生：5 种武器全有，子弹是初始数
+  // 出生：6 种武器全有，子弹是初始数
   const sim = new Sim(), p = sim.player;
-  chk(p.owned.every(Boolean) && p.owned.length === 5, '出生就拥有全部 5 种武器');
-  chk(p.ammo[1] === 80 && p.ammo[2] === 150 && p.ammo[3] === 24 && p.ammo[4] === 6, '出生子弹是初始数（手枪 80、冲锋枪 150、霰弹枪 24、火箭筒 6）');
-  for (let i = 0; i < 5; i++) { sim.selectWeapon(i); chk(p.weapon === i, `数字键能直接切到${WEAPONS[i].name}`); }
+  chk(p.owned.every(Boolean) && p.owned.length === 6, '出生就拥有全部 6 种武器');
+  chk(p.ammo[1] === 80 && p.ammo[2] === 150 && p.ammo[3] === 24 && p.ammo[4] === 6 && p.ammo[5] === 4, '出生子弹是初始数（手枪 80、冲锋枪 150、霰弹枪 24、火箭筒 6、烟花 4）');
+  for (let i = 0; i < 6; i++) { sim.selectWeapon(i); chk(p.weapon === i, `数字键能直接切到${WEAPONS[i].name}`); }
   // 读旧存档（只有两把枪）时补齐
   const old = new Sim({ money: 500, owned: [true, true, false, false, false], ammo: [0, 10, 0, 0, 0], done: [] });
-  chk(old.player.owned.every(Boolean), '读旧存档（只有两把枪）时补齐全部 5 种武器');
-  chk(old.player.ammo[1] === 10 && old.player.ammo[2] === 150 && old.player.ammo[3] === 24 && old.player.ammo[4] === 6, '旧存档已有的手枪保留 10 发，缺的武器按初始数补');
+  chk(old.player.owned.every(Boolean), '读旧存档（只有两把枪）时补齐全部 6 种武器');
+  chk(old.player.ammo[1] === 10 && old.player.ammo[2] === 150 && old.player.ammo[3] === 24 && old.player.ammo[4] === 6 && old.player.ammo[5] === 4, '旧存档已有的手枪保留 10 发，缺的武器按初始数补（烟花 也补 4 发）');
   // 每种武器打到 0 都自动补满，补满后能继续开火
-  for (let i = 1; i < 5; i++) {
+  for (let i = 1; i < 6; i++) {
     const s2 = new Sim(), q = s2.player;
     q.weapon = i; q.ammo[i] = 1; q.shootCd = 0; s2.ctl.aimYaw = 0;
     let refilled = false;
@@ -533,7 +533,7 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
 // 坦克炮 reload 1.4 → 0.1 秒；警察的 COP.rate 不动；伤害、射程、弹药数都不动。
 {
   // 数值本身
-  chk(WEAPONS.every((w) => w.rate === 10), `五种武器射速都是 10 发/秒（${WEAPONS.map((w) => w.name + w.rate).join('、')}）`);
+  chk(WEAPONS.every((w) => w.rate === 10), `六种武器射速都是 10 发/秒（${WEAPONS.map((w) => w.name + w.rate).join('、')}）`);
   chk(VEH.tank.reload === 0.1, `坦克炮间隔 0.1 秒（原来 1.4 秒）`);
   chk(JSON.stringify(COP.rate) === JSON.stringify([0, 1.2, 1.2, 1.6, 4, 3]), '警察的开火间隔不动');
   // 按住开火 2 秒数发数：每种武器都约 20 发（允许 ±1 帧的边界误差）
@@ -546,14 +546,15 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     }
     return n;
   };
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const sim = new Sim(), p = sim.player;
     p.godT = Infinity; p.weapon = i; p.shootCd = 0;
     sim.ctl.aimYaw = 0; sim.ctl.aimSet = true; sim.ctl.fire = true;
     const n = holdFire(sim, 2);
     sim.ctl.fire = false;
-    const got = i === 0 ? (n.punch || 0) : (n[WEAPONS[i].id] || 0);
-    chk(got >= 19 && got <= 21, `${WEAPONS[i].name}按住开火 2 秒 ${got} 发（10 发/秒）`);
+    // 烟花 一轮 8 枚：shot 事件数除以 8 就是轮数
+    const got = i === 0 ? (n.punch || 0) : (i === 5 ? Math.round((n.fireworks || 0) / 8) : (n[WEAPONS[i].id] || 0));
+    chk(got >= 19 && got <= 21, `${WEAPONS[i].name}按住开火 2 秒 ${got} 发${i === 5 ? '轮' : ''}（10 发/秒）`);
   }
   // 车上火箭筒同样 10 发/秒（轿车上按住 2 秒）
   {
@@ -720,5 +721,450 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
   }
   chk(finite(sim), '地标和炸楼一轮后数值仍然合法');
 }
+// ---- 16) 新武器烟花（2026-11-21）：一轮 8 枚齐射，10 轮/秒，每轮只耗 1 发弹药 ----
+{
+  const R = WEAPON_INDEX.fireworks;
+  chk(R === 5, `烟花 是第 6 种武器（index ${R}）`);
+  const wp = WEAPONS[R];
+  chk(wp.dmg === 320 && wp.rate === 10 && wp.range === 130 && wp.radius === 7 && wp.speed === 55 && wp.explosive, '烟花 属性和火箭筒一致（伤害 320、射速 10、射程 130、爆炸半径 7、速度 55）');
+  chk(AMMO[R] === 4, '烟花 初始 4 发弹药');
+  // 一轮恰好 8 枚，方向间隔 45 度（量化：8 个方向角排序后相邻差都是 π/4）
+  {
+    const sim = new Sim(), p = sim.player;
+    p.godT = Infinity; p.weapon = R; p.shootCd = 0;
+    sim.ctl.aimYaw = 0.3; sim.ctl.aimSet = true; sim.ctl.fire = true;
+    sim.update(dt); sim.ctl.fire = false;
+    const shots = sim.shots.slice();
+    chk(shots.length === 8, `烟花 一轮齐射 ${shots.length} 枚（应为 8 枚）`);
+    const angs = shots.map((s) => Math.atan2(s.dx, s.dz)).sort((a, b) => a - b);
+    let even = shots.length === 8;
+    for (let k = 0; k < 8; k++) { const d = angs[(k + 1) % 8] - angs[k]; const dd = d < 0 ? d + 2 * Math.PI : d; if (Math.abs(dd - Math.PI / 4) > 0.001) even = false; }
+    chk(even, `8 枚方向间隔都是 45 度（实测角度 ${angs.map((a) => (a * 57.3).toFixed(0)).join('、')} 度，瞄准方向 ${(0.3 * 57.3).toFixed(0)} 度）`);
+    chk(shots.every((s) => s.kind === 'fireworks' && s.speed === 55 && s.dmg === 320 && s.radius === 7 && s.range === Infinity && s.byPlayer && s.owner === null), '8 枚都是独立火箭（kind fireworks、速度 55、伤害 320、半径 7、射程无限）');
+    chk(p.ammo[R] === 3, `一轮齐射只耗 1 发弹药（剩 ${p.ammo[R]} 发）`);
+    const shotEv = sim.events.filter((e) => e.type === 'shot');
+    chk(shotEv.length === 8 && shotEv.every((e) => e.w === 'fireworks'), `一轮发了 ${shotEv.length} 个 shot 事件（不多不少，音效不会响两遍）`);
+    sim.events.length = 0;
+  }
+  // 射速：按住 2 秒 20 轮（atkSeq +20），共 160 枚
+  {
+    const sim = new Sim(), p = sim.player;
+    p.godT = Infinity; p.weapon = R; p.shootCd = 0;
+    sim.ctl.aimYaw = 0; sim.ctl.aimSet = true; sim.ctl.fire = true;
+    const a0 = p.atkSeq; let n = 0;
+    for (let i = 0; i < 2 * TICK; i++) { sim.update(dt); for (const e of sim.events) if (e.type === 'shot' && e.w === 'fireworks') n++; sim.events.length = 0; }
+    sim.ctl.fire = false;
+    chk(p.atkSeq - a0 >= 19 && p.atkSeq - a0 <= 21, `按住烟花 开火 2 秒 ${p.atkSeq - a0} 轮（10 轮/秒）`);
+    chk(n >= 152 && n <= 168, `2 秒共射出 ${n} 枚火箭（20 轮 × 8 枚）`);
+  }
+  // 打空自动补满：剩 1 发时开一轮，补满到 4 发
+  {
+    const sim = new Sim(), p = sim.player;
+    p.godT = Infinity; p.weapon = R; p.ammo[R] = 1; p.shootCd = 0;
+    sim.ctl.aimYaw = 0; sim.ctl.aimSet = true; sim.ctl.fire = true;
+    sim.update(dt); sim.ctl.fire = false;
+    chk(p.ammo[R] === AMMO[R], `烟花 剩 1 发时开一轮，打空后自动补满到 ${p.ammo[R]} 发`);
+  }
+  // 旧存档兼容：只有 5 项的 owned/ammo 数组，读档后烟花 默认拥有、弹药 4 发
+  {
+    const old = new Sim({ money: 100, owned: [true, true, true, true, true], ammo: [0, 80, 150, 24, 6], done: [] });
+    chk(old.player.owned.length === 6 && old.player.owned[5] && old.player.ammo[5] === 4, '读 5 项旧存档，烟花 默认拥有、弹药 4 发');
+  }
+  // 切武器：selectWeapon(5) 能切，selectWeapon(6) 越界拒绝；Q 循环能走到烟花、也能从它回到拳头
+  {
+    const sim = new Sim(), p = sim.player;
+    sim.selectWeapon(5);
+    chk(p.weapon === 5, 'selectWeapon(5) 切到烟花');
+    sim.selectWeapon(6);
+    chk(p.weapon === 5, 'selectWeapon(6) 越界，武器不变');
+    p.weapon = WEAPON_INDEX.rocket; sim.ctl.swap = true; sim.update(dt);
+    chk(p.weapon === 5, 'Q 换武器：从火箭筒换到烟花');
+    sim.ctl.swap = true; sim.update(dt);
+    chk(p.weapon === 0, 'Q 换武器：从烟花 换回拳头');
+  }
+  // 车上火箭还是普通火箭筒：不走 fireworks、不耗烟花 的弹药
+  {
+    const sim = new Sim(), p = sim.player;
+    const car = sim.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(sim, car.x + 2.5, car.z); sim.ctl.enter = true; run(sim, 0.1);
+    p.godT = Infinity; p.shootCd = 0;
+    const a4 = p.ammo[WEAPON_INDEX.rocket], a5 = p.ammo[R];
+    sim.ctl.aimYaw = 0; sim.ctl.aimSet = true; sim.ctl.rocket = true;
+    let nR = 0, n360 = 0;
+    for (let k = 0; k < Math.floor(0.5 * TICK); k++) { sim.update(dt); for (const e of sim.events) { if (e.type === 'shot' && e.w === 'rocket') nR++; if (e.type === 'shot' && e.w === 'fireworks') n360++; } sim.events.length = 0; }
+    sim.ctl.rocket = false;
+    chk(nR >= 4 && n360 === 0, `轿车上按住火箭键 0.5 秒发了 ${nR} 枚普通火箭、0 枚烟花`);
+    chk(p.ammo[WEAPON_INDEX.rocket] < a4 && p.ammo[R] === a5, '车上火箭只耗火箭筒弹药，烟花 弹药不动');
+  }
+  // 持续开火 5 秒的性能实测：只报数，不设玩法上限
+  const perf360 = (sim, secs) => {
+    let maxShots = 0, booms = 0;
+    const t0 = Date.now();
+    sim.ctl.fire = true;
+    for (let i = 0; i < secs * TICK; i++) {
+      sim.update(dt);
+      maxShots = Math.max(maxShots, sim.shots.length);
+      for (const e of sim.events) if (e.type === 'explosion') booms++;
+      sim.events.length = 0;
+    }
+    sim.ctl.fire = false;
+    return { ms: (Date.now() - t0) / (secs * TICK), maxShots, booms };
+  };
+  {
+    const sim = new Sim(), p = sim.player;
+    p.godT = Infinity; p.weapon = R; p.shootCd = 0;
+    sim.ctl.aimYaw = 0; sim.ctl.aimSet = true;
+    const g = perf360(sim, 5);
+    console.log(`     地面连续烟花 开火 5 秒：每逻辑帧 ${g.ms.toFixed(3)} ms，飞行中火箭最多 ${g.maxShots} 枚，爆炸 ${g.booms} 次`);
+    chk(finite(sim), '地面连续烟花 开火 5 秒后数值仍然合法');
+  }
+  {
+    // 高空：站在全城最高的可降落平屋顶上打，火箭飞得最远、存活最久
+    const sim = new Sim(), p = sim.player, w = sim.world;
+    const tower = w.buildings.filter((b) => b.roof === 0).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+    const cx = (tower.x0 + tower.x1) / 2, cz = (tower.z0 + tower.z1) / 2, top = tower.y0 + tower.h;
+    p.x = p.px = cx; p.z = p.pz = cz; p.y = top;
+    p.godT = Infinity; p.weapon = R; p.shootCd = 0;
+    sim.ctl.aimYaw = 0; sim.ctl.aimSet = true;
+    const a = perf360(sim, 5);
+    console.log(`     ${top.toFixed(0)} 米楼顶连续烟花 开火 5 秒：每逻辑帧 ${a.ms.toFixed(3)} ms，飞行中火箭最多 ${a.maxShots} 枚，爆炸 ${a.booms} 次`);
+    chk(finite(sim), '楼顶连续烟花 开火 5 秒后数值仍然合法');
+  }
+}
+
+// ---- 17) 炸平后重建：随机 60~180 秒，血量回满，屋顶恢复；占地有步行玩家时延后，车不再挡重建（见 §18） ----
+{
+  // 每帧跑完后把 buildingUp 事件记下来再清（run() 每步都会清 events，直接读不到）
+  const runRec = (s, sec) => { const got = []; for (let i = 0; i < sec * TICK; i++) { s.update(dt); for (const e of s.events) if (e.type === 'buildingUp') got.push(e); s.events.length = 0; } return got; };
+  // 重建时间每栋独立随机：落在 [60, 180] 秒内
+  const sim = new Sim(), w = sim.world;
+  const victims = [w.buildings.find((b) => b.kind === 'house'), w.buildings.find((b) => b.kind === 'shop'), w.buildings.find((b) => b.kind === 'tower'), w.buildings.find((b) => b.name === '埃菲尔铁塔')];
+  for (const b of victims) sim.damageBuilding(b, 99999);
+  for (const b of victims) {
+    const d = b.rebuildAt - sim.time;
+    chk(b.destroyed && d >= 60 && d <= 180, `${b.name || b.kind}被炸平后重建时间 ${d.toFixed(1)} 秒（在 60~180 秒内）`);
+  }
+  chk(sim.rebuildQueue.length === victims.length, `等重建的队里有 ${sim.rebuildQueue.length} 栋楼`);
+  // 没到时间不重建：59 秒后还在废墟（计时只跟着游戏时间走，不跑 update() 就不动，暂停也一样冻结）
+  run(sim, 59);
+  chk(victims.every((b) => b.destroyed), '炸平 59 秒后还没重建（最短也要 60 秒）');
+  // 到时间自然重建：再跑 150 秒（59+150=209，超过最晚的 180 秒，肯定都过了）
+  const ups = runRec(sim, 150);
+  chk(victims.every((b) => !b.destroyed && b.hp === b.maxHp && b.rebuildAt === 0), '炸平后 60~180 秒内全部重建、耐久回满');
+  chk(sim.rebuildQueue.length === 0, '重建完队就空了');
+  chk(ups.length === victims.length && ups.every((e) => victims.includes(e.b)), `重建时每栋都发了 buildingUp 事件（${ups.length} 个）`);
+  // 重建后碰撞、屋顶、视线都回来了
+  const h0 = victims[0], cx0 = (h0.x0 + h0.x1) / 2, cz0 = (h0.z0 + h0.z1) / 2;
+  chk(!!w.collide({ x: cx0, z: cz0 }, 0.6, 2), '重建后废墟又有了碰撞（人走不过去）');
+  chk(Math.abs(w.supportY(cx0, cz0) - (h0.y0 + h0.h)) < 0.01, '重建后站立高度回到楼顶');
+  chk(w.blocked(cx0 - 10, cz0, cx0 + 10, cz0, 3), '重建后视线又被这栋楼挡住');
+  chk(finite(sim), '重建一轮后数值仍然合法');
+  // 玩家站在废墟上：重建延后，人走了才重建
+  {
+    const s = new Sim(), w2 = s.world, p = s.player;
+    const h = w2.buildings.find((b) => b.kind === 'house' && Math.hypot((b.x0 + b.x1) / 2 - p.x, (b.z0 + b.z1) / 2 - p.z) > 60);
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    s.damageBuilding(h, 99999);
+    tp(s, cx, cz);   // 玩家站进废墟里
+    h.rebuildAt = s.time + 0.1;   // 手动把时间拨近，测触发机制（随机等待本身上面已测）
+    run(s, 3);
+    chk(h.destroyed && h.rebuildAt > s.time, '玩家站在废墟上时重建延后（没重建，重建时间往后推了）');
+    tp(s, cx + 30, cz);   // 走开
+    run(s, 10);
+    chk(!h.destroyed && h.hp === h.maxHp, '玩家离开后重建完成、耐久回满');
+  }
+  // 车停在废墟上：不再延后重建，到时间车直接炸掉、楼回来（旧规则“车挡重建”已改，见 §18）
+  {
+    const s = new Sim(), w2 = s.world;
+    const h = w2.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    car.parked = true;   // 别让交通回收逻辑把它当闲置车删掉
+    s.damageBuilding(h, 99999);
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed && h.hp === h.maxHp, '废墟上的车不挡重建：到时间楼回来了、耐久回满（爆炸发生在楼恢复之前，没伤到新楼）');
+    chk(!car.alive && car.wreck, '废墟上的车在重建那一刻炸掉了（残骸）');
+  }
+  // 直升机悬停在楼顶上方：不挡重建
+  {
+    const s = new Sim(), w2 = s.world;
+    const h = w2.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2, top = h.y0 + h.h;
+    const heli = s.vehicles.find((v) => v.type === 'heli');
+    heli.x = cx; heli.z = cz; heli.y = top + 30; heli.flying = true; heli.vy = 0; heli.pitch = 0; heli.roll = 0; heli.yaw = 0;
+    s.damageBuilding(h, 99999);
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed && heli.flying && heli.y > top + 0.5, '直升机悬停在楼顶上方不挡重建（楼回来了，直升机还在上面悬停）');
+  }
+  // 行人在废墟里：重建时把发呆的行人推到楼外
+  {
+    const s = new Sim(), w2 = s.world;
+    const h = w2.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    tp(s, cx + 20, cz);   // 玩家站附近看着，不然行人离玩家太远会被系统直接删掉
+    s.damageBuilding(h, 99999);
+    const o = s.addPed('civ', cx, cz);
+    o.state = 'idle'; o.t = 999;   // 发呆，不自己走出去
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    // 注意：collide 把圆心在楼里的行人推到最近的墙面外沿，正好贴在边界上（坐标等于 x0-r），所以用 <= 加微小容差判，不能用严格 <
+    const eps = 1e-6;
+    const outside = o.x <= h.x0 - o.r + eps || o.x >= h.x1 + o.r - eps || o.z <= h.z0 - o.r + eps || o.z >= h.z1 + o.r - eps;
+    chk(!h.destroyed && outside, '重建时把发呆的行人推到了楼外（没卡在楼里）');
+  }
+  // 地标也重建：耐久回满，屋顶仍不可降落
+  {
+    const s = new Sim(), w2 = s.world;
+    const lm = w2.buildings.find((b) => b.name === '埃菲尔铁塔');
+    const cx = (lm.x0 + lm.x1) / 2, cz = (lm.z0 + lm.z1) / 2;
+    s.damageBuilding(lm, 99999);
+    chk(lm.destroyed && lm.rebuildAt - s.time >= 60, '地标被炸平后也排队等重建');
+    lm.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!lm.destroyed && lm.hp === lm.maxHp && lm.hp === 1920, '地标重建、耐久回满 1920');
+    chk(lm.roof === 1 && !w2.roofAt(cx, cz, 0, 7.5, 2.6), '地标重建后仍不可降落（roof=1 不变）');
+  }
+  // 平顶高楼重建后屋顶又能降落
+  {
+    const s = new Sim(), w2 = s.world;
+    const t = w2.buildings.filter((b) => b.roof === 0 && (b.x1 - b.x0) >= 18 && (b.z1 - b.z0) >= 18 && b.y0 + b.h >= 30).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+    const cx = (t.x0 + t.x1) / 2, cz = (t.z0 + t.z1) / 2;
+    chk(!!w2.roofAt(cx, cz, 0, 7.5, 2.6), '重建前先确认：这栋平顶高楼本来可降落');
+    s.damageBuilding(t, 99999);
+    chk(!w2.roofAt(cx, cz, 0, 7.5, 2.6), '炸平后屋顶不认了');
+    t.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    const r = w2.roofAt(cx, cz, 0, 7.5, 2.6);
+    chk(!t.destroyed && r && Math.abs(r.top - (t.y0 + t.h)) < 0.01, '重建后屋顶又能降落了（roofAt 恢复，高度就是楼顶）');
+  }
+}
+// ---- 18) 重建新规则：警车穿废墟、废墟上的车重建时炸掉、主角座驾无敌 ----
+{
+  // 警车能穿过废墟：视线和路都不挡（有意为之，不是 bug）
+  // (a) 视线和碰撞：楼完好时挡，炸平后不挡
+  {
+    const s = new Sim(), w = s.world;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const half = Math.min((h.x1 - h.x0) / 2, (h.z1 - h.z0) / 2);
+    chk(w.blocked(cx - half - 8, cz, cx + half + 8, cz, 3), '楼完好时视线被挡住');
+    chk(!!w.collide({ x: cx, z: cz }, 0.6, 2), '楼完好时废墟位置有碰撞');
+    s.damageBuilding(h, 99999);
+    chk(!w.blocked(cx - half - 8, cz, cx + half + 8, cz, 3), '楼炸平后视线穿过废墟（blocked 跳过已炸平的楼）');
+    chk(!w.collide({ x: cx, z: cz }, 0.6, 2), '楼炸平后废墟没有碰撞');
+  }
+  // (b) 动态：追捕的警车直线穿过废墟去追玩家
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    // 找一栋民居和一个方向：两边落脚点都没楼、连线只被这一栋楼挡住（炸掉它视线就通了）
+    let pick = null;
+    for (const h of w.buildings.filter((b) => b.kind === 'house' && (b.x1 - b.x0) >= 10 && (b.z1 - b.z0) >= 10)) {
+      const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+      for (const [dx, dz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const ax = cx - dx * 14, az = cz - dz * 14, bx = cx + dx * 14, bz = cz + dz * 14;
+        const t1 = { x: ax, z: az }, t2 = { x: bx, z: bz };
+        if (w.collide(t1, 1, 2) || w.collide(t2, 1, 2)) continue;   // 落脚点有楼
+        if (!w.blocked(ax, az, bx, bz, 3)) continue;   // 连线本来就没被挡，不是这栋楼的功劳
+        pick = { h, cx, cz, dx, dz, ax, az, bx, bz };
+        break;
+      }
+      if (pick) break;
+    }
+    chk(!!pick, '找到一栋可测试的民居（两边落脚点没楼、连线只被它挡住）');
+    if (pick) {
+      const { h, cx, cz, dx, dz, ax, az, bx, bz } = pick;
+      p.godT = Infinity;   // 玩家无敌，免得追上来的警察把人打死、复活传送打乱位置
+      tp(s, bx, bz);
+      s.stars = 2; s.heat = 2;   // 保持追捕状态，别让通缉系统把警车变回巡逻车
+      const cop = s.addVehicle('police', ax, az, Math.atan2(dx, dz));
+      cop.driver = 'npc'; cop.siren = true; cop.ai = { kind: 'chase', route: null, routeT: 0, stuck: 0, rev: 0 };
+      s.damageBuilding(h, 99999);
+      chk(!w.blocked(ax, az, bx, bz, 3), '楼炸平后警车到玩家的视线通了');
+      let entered = false, maxAlong = 0;
+      for (let i = 0; i < 15 * TICK; i++) {
+        s.update(dt); s.events.length = 0;
+        if (cop.x > h.x0 && cop.x < h.x1 && cop.z > h.z0 && cop.z < h.z1) entered = true;
+        maxAlong = Math.max(maxAlong, (cop.x - ax) * dx + (cop.z - az) * dz);
+      }
+      chk(entered, '追捕的警车开进了废墟占地（废墟不挡路）');
+      chk(maxAlong > 14, `警车穿过废墟中心、向玩家方向开了 ${maxAlong.toFixed(1)} 米（起点到中心 14 米）`);
+      chk(finite(s), '警车穿废墟后数值仍然合法');
+    }
+  }
+  // 废墟上的空车：重建那一刻直接炸掉（警车、交通车也一样）
+  {
+    const s = new Sim(), w = s.world;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    const cop = s.addVehicle('police', cx + 3, cz, 0);
+    cop.driver = 'npc';   // 警车，有司机；不要给它挂 chase AI，不然离玩家太远时交通回收逻辑会在重建前把它删掉
+    car.parked = true; cop.parked = true;
+    s.damageBuilding(h, 99999);
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed && h.hp === h.maxHp, '有车在废墟上照样重建、耐久回满');
+    chk(!car.alive && car.wreck, '废墟上的空轿车在重建时炸掉了');
+    chk(!cop.alive && cop.wreck, '废墟上的警车在重建时也炸掉了（追捕系统会重新派车）');
+  }
+  // 停在倒塌建筑旁边的车不受影响（旧规则不变）
+  {
+    const s = new Sim(), w = s.world;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx + (h.x1 - h.x0) / 2 + 8, cz, 0);   // 楼边 8 米外
+    car.parked = true;
+    const hp0 = car.hp;
+    s.damageBuilding(h, 99999);
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed, '楼重建了');
+    chk(car.alive && car.hp === hp0, '楼边 8 米外的车不受影响（没炸、没掉血）');
+  }
+  // 主角坐着的车无敌：火箭弹、爆炸、撞车都不掉血；没人坐的对照组照常掉血
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === car, '先坐进轿车');
+    p.godT = Infinity;
+    const hp0 = car.hp;
+    car.damage(500, true);   // 直接伤害：火箭弹、坦克炮、撞车走的都是 Vehicle.damage
+    chk(car.hp === hp0 && car.alive && !car.burning, '坐着的车被打 500 也不掉血、不起火');
+    s.explode(car.x + 3, car.y + 1, car.z, 8, 320, true);   // 旁边炸一枚火箭
+    chk(car.hp === hp0 && car.alive, '旁边爆炸也不掉血（爆炸不推车、不伤车）');
+    // 对照：没人坐的同款车，同样爆炸会掉血
+    const car2 = s.addVehicle('sedan', car.x + 20, car.z, 0);
+    const hp2 = car2.hp;
+    s.explode(car2.x + 3, car2.y + 1, car2.z, 8, 320, true);
+    chk(car2.hp < hp2, '对照：没人坐的车同样爆炸会掉血');
+    // 火箭弹实打：从车顶上方垂直打一枚火箭下来，火箭在车顶炸开、车不掉血
+    const before = car.hp;
+    s.shoot({ x: car.x, y: car.y + 20, z: car.z, dx: 0, dy: -1, dz: 0, speed: 55, range: 100, radius: 7, dmg: 320, byPlayer: false, kind: 'rocket', owner: null });
+    let boom = false;
+    for (let i = 0; i < 3 * TICK; i++) { s.update(dt); if (s.events.some((e) => e.type === 'explosion')) boom = true; s.events.length = 0; if (!s.shots.length) break; }
+    chk(boom, '火箭弹飞到了车顶、炸开了');
+    chk(car.hp === before && car.alive, '火箭弹在车顶炸开，坐着的车不掉血');
+  }
+  // 重建时主角坐着的车被推到楼外：楼回来、车完好、玩家还在车里、还能开
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    car.parked = true;
+    s.damageBuilding(h, 99999);   // 先拆楼，不然玩家传送到楼里会被碰撞推出去、够不着车
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === car, '先坐进停在废墟上的车');
+    const hp0 = car.hp;
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    const eps = 1e-6;
+    const outside = car.x <= h.x0 - car.radius + eps || car.x >= h.x1 + car.radius - eps || car.z <= h.z0 - car.radius + eps || car.z >= h.z1 + car.radius - eps;
+    chk(!h.destroyed && h.hp === h.maxHp, '楼重建了');
+    chk(car.alive && car.hp === hp0, '主角坐着的车在重建时没炸、没掉血');
+    chk(p.inVeh === car, '玩家还坐在车里');
+    chk(outside, '车被推到了楼外（没卡在楼里）');
+    // 还能开：车头掉向楼外、踩油门能开走
+    car.yaw = Math.atan2(car.x - cx, car.z - cz);
+    const ox = car.x, oz = car.z;
+    run(s, 2, () => { s.ctl.gas = 1; });
+    chk(Math.hypot(car.x - ox, car.z - oz) > 5 && p.inVeh === car, '推出去的车还能开（2 秒开出 5 米以上，玩家还在车里）');
+  }
+  // 刚下车的空车不算乘坐：重建时照样炸
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    car.parked = true;
+    s.damageBuilding(h, 99999);   // 先拆楼，不然玩家传送到楼里会被碰撞推出去、够不着车
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === car, '先坐进车');
+    s.ctl.enter = true; run(s, 0.2);
+    chk(!p.inVeh && car.driver === null, '下车后车没人坐');
+    tp(s, cx + 30, cz);   // 玩家走开，免得人站在废墟上挡住重建
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed && h.hp === h.maxHp, '楼重建了');
+    chk(!car.alive && car.wreck, '刚下车的空车在重建时炸掉了');
+  }
+  // 步行的玩家站在废墟上：重建照旧延后（不能炸玩家）
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    const h = w.buildings.find((b) => b.kind === 'house' && Math.hypot((b.x0 + b.x1) / 2 - p.x, (b.z0 + b.z1) / 2 - p.z) > 60);
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    s.damageBuilding(h, 99999);
+    tp(s, cx, cz);
+    h.rebuildAt = s.time + 0.1;
+    run(s, 3);
+    chk(h.destroyed && h.rebuildAt > s.time, '步行的玩家站在废墟上时重建延后（新规则下步行玩家仍挡重建）');
+    tp(s, cx + 30, cz);
+    run(s, 10);
+    chk(!h.destroyed && h.hp === h.maxHp, '玩家离开后重建完成');
+  }
+}
+
+// ---- 19) 上车：码头边上船、走路靠近各型载具、移动的车（2026-11-21） ----
+{
+  // 码头边上船：三艘固定快艇都系在码头边 4 米内，站在码头边按上车就能上去
+  // （修前是 6 米，超出上车窗口 5.4 米，码头边上按上车永远够不着；游泳到 1 米内才能上）
+  for (const want of [0, 1, 2]) {
+    const sim = new Sim(), pier = sim.world.places.pier;
+    const b = sim.vehicles.filter((v) => v.type === 'boat')[want];
+    const cx = Math.min(Math.max(b.x, pier.x0), pier.x1), cz = Math.min(Math.max(b.z, pier.z0), pier.z1);
+    const dEdge = Math.hypot(b.x - cx, b.z - cz);
+    tp(sim, cx, cz, 2); sim.ctl.enter = true; run(sim, 0.1);
+    chk(sim.player.inVeh === b, `码头边 ${dEdge.toFixed(1)} 米外的快艇 ${want + 1} 号能直接上船`);
+  }
+  // 任务船也系在码头边：任务“水上追风”的生成点离码头边不到 5.4 米
+  {
+    const sim = new Sim(), pier = sim.world.places.pier;
+    const m = sim.missions.list.find((x) => x.id === 'boat');
+    const cx = Math.min(Math.max(m.spawn[0], pier.x0), pier.x1), cz = Math.min(Math.max(m.spawn[1], pier.z0), pier.z1);
+    const d = Math.hypot(m.spawn[0] - cx, m.spawn[1] - cz);
+    chk(d < 5.4, `任务快艇生成点离码头边 ${d.toFixed(1)} 米，在上车窗口内（修前 6 米）`);
+  }
+  // 走路靠近坦克、摩托：走到跟前按上车能上去
+  for (const [type, name] of [['tank', '坦克'], ['bike', '摩托']]) {
+    const sim = new Sim(), p = sim.player;
+    const v = sim.vehicles.find((x) => x.type === type && x.fixed) || sim.addVehicle(type, 700, 700, 0);
+    v.yaw = 0;
+    const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
+    tp(sim, v.x - fx * 10, v.z - fz * 10);
+    run(sim, 3, () => { sim.ctl.mx = fx; sim.ctl.mz = fz; });
+    sim.ctl.mx = 0; sim.ctl.mz = 0;
+    const dWalk = Math.hypot(p.x - v.x, p.z - v.z);
+    sim.ctl.enter = true; run(sim, 0.1);
+    chk(p.inVeh === v, `走路靠近${name}，走到中心距 ${dWalk.toFixed(1)} 米按上车能上去`);
+  }
+  // 移动的交通车：路边站着，车以 13 米/秒开过，进窗口 0.25 秒后按上车能上去（正常反应速度）
+  {
+    const w = new Sim().world;
+    let best = null;
+    for (const e of w.edges) { const len = Math.abs(e.b.x - e.a.x) + Math.abs(e.b.z - e.a.z); if (!best || len > best.len) best = { ...e, len }; }
+    const dx = Math.sign(best.b.x - best.a.x), dz = Math.sign(best.b.z - best.a.z);
+    const midx = (best.a.x + best.b.x) / 2, midz = (best.a.z + best.b.z) / 2;
+    const sim = new Sim(), p = sim.player;
+    const car = sim.addVehicle('sedan', best.a.x + dx * 10 - dz * 3.4, best.a.z + dz * 10 + dx * 3.4, Math.atan2(dx, dz));
+    car.driver = 'npc'; car.ai = { kind: 'traffic', from: best.a, to: best.b, panic: 0, stuck: 0, rev: 0 };
+    car.vx = dx * 13; car.vz = dz * 13;
+    tp(sim, midx - dz * (3.4 + 3), midz + dx * (3.4 + 3));
+    let visAt = -1, ok = false;
+    for (let i = 0; i < 30 * TICK; i++) {
+      sim.update(dt); sim.events.length = 0;
+      if (visAt < 0 && sim.nearestVehicle() === car) visAt = i;
+      if (visAt >= 0 && i === visAt + Math.round(0.25 * TICK)) { sim.ctl.enter = true; sim.update(dt); ok = !!p.inVeh; break; }
+      if (visAt >= 0 && i > visAt + 60) break;
+    }
+    chk(ok, '路边等车开过：车进窗口 0.25 秒后按上车，能上 13 米/秒的交通车');
+  }
+}
+
 console.log(fail ? `有 ${fail} 项失败` : '落日湾逻辑测试全部通过');
 process.exit(fail ? 1 : 0);

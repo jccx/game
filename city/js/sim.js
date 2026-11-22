@@ -15,10 +15,12 @@ export class Sim {
     this.world = new World();
     this.time = 0;
     this.refillToastT = -99;   // 上一次弹“子弹已补满”提示的游戏时间（节流用，见 refillWeapon）
+    this.rebuildToastT = -99;   // 上一次弹“XX已重建”提示的游戏时间（节流用，见 rebuildBuilding）
+    this.rebuildQueue = [];   // 等重建的建筑（被炸平后按 rebuildAt 排队，见 damageBuilding / updateRebuilds）
     this.events = [];
     this.vehicles = []; this.peds = []; this.shots = []; this.pickups = [];
     const sp = this.world.places.spawn;
-    // 出生就拥有全部 5 种武器（2026-11-21）：不用拾取或解锁。旧存档只有部分武器时也补齐：
+    // 出生就拥有全部 6 种武器（2026-11-21）：不用拾取或解锁。旧存档只有部分武器时也补齐：
     // 已有的武器保留存档里的子弹数；缺的武器按初始子弹数补；子弹数为 0 的也按初始数补满。
     const owned = WEAPONS.map(() => true);
     const ammo = AMMO.slice();
@@ -37,6 +39,7 @@ export class Sim {
     this.heat = 0; this.stars = 0; this.unseenT = 0; this.copSpawnT = 0; this.seen = false; this.seeT = 0; this.wantedLock = false;
     this.spawnT = 0; this.pedT = 0; this.nearBlocks = []; this.nearT = 0;
     this.fixedSpawns = []; this.fixedI = 0;       // 固定停放的载具（飞机、船、坦克等）：毁了或被开走后会在原地补一辆
+    this.net = null;   // 联机（Hud 加入后才设）：只用来同步建筑/载具状态，单机时一直是 null
     this.setupWorld();
     this.missions = new Missions(this, save.done || []);
   }
@@ -280,7 +283,7 @@ export class Sim {
 
   /* ------------------------------------------------------------ 武器 */
 
-  /** 直接切到第 i 种武器（数字键 1~5 用）。出生就全拥有，所以任何一把都能直接切到 */
+  /** 直接切到第 i 种武器（数字键 1~6 用）。出生就全拥有，所以任何一把都能直接切到 */
   selectWeapon(i) {
     const p = this.player;
     if (i < 0 || i >= WEAPONS.length || !p.owned[i]) return;
@@ -335,6 +338,16 @@ export class Sim {
     this.noise(p.x, p.z, 45);
     if (wp.explosive) {
       // shoot() 自己会发一个 shot 事件（位置是火箭出发点），这里不再单独发一个，不然每发火箭有两个 shot 事件、发射音效响两遍
+      if (wp.id === 'fireworks') {
+        // 烟花：一轮同时向 8 个方向齐射，方向是瞄准方向 + k*45 度（k=0..7）；每枚都是独立的 shoot() 调用，
+        // 所以每枚有自己的 shot 事件和音效判定（kind 用 'fireworks'，view.js 里按火箭筒一样放 'boost' 音效）；
+        // 弹药只在上面扣过 1 发（这一轮 8 枚只耗 1 发弹药）
+        for (let k = 0; k < 8; k++) {
+          const a = yaw + (k * Math.PI) / 4;
+          this.shoot({ x: p.x + Math.sin(a) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(a) * 0.8, dx: Math.sin(a), dy: 0.02, dz: Math.cos(a), speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'fireworks', owner: null });
+        }
+        return;
+      }
       this.shoot({ x: p.x + Math.sin(yaw) * 0.8, y: p.y + 1.5, z: p.z + Math.cos(yaw) * 0.8, dx: Math.sin(yaw), dy: 0.02, dz: Math.cos(yaw), speed: wp.speed, range: Infinity, radius: wp.radius, dmg: wp.dmg, byPlayer: true, kind: 'rocket', owner: null });   // 火箭筒射程无限：飞到命中才爆炸（瞄准辅助还是只看 130 米内，见上面的 pickAim）
       return;
     }
@@ -434,6 +447,7 @@ export class Sim {
     for (const o of this.peds) { if (!o.alive) continue; const d = Math.hypot(o.x - x, o.z - z); if (d < r) this.hurtPed(o, dmg * (1 - d / r) * 1.2, byPlayer, x, z); }
     for (const v of this.vehicles) {
       if (v === src || !v.alive) continue;
+      if (v.driver === 'player') continue;   // 主角的座驾无敌：爆炸既不掉血，也不把它炸飞（伤害本身也过 Vehicle.damage，那里同样守着）
       const d = Math.hypot(v.x - x, v.z - z);
       if (d < r + v.radius) {
         v.damage(dmg * (1 - d / (r + v.radius)) * (v.spec.cls === 'tank' ? 0.35 : 1), byPlayer);
@@ -460,13 +474,117 @@ export class Sim {
     if (byPlayer) this.crime(CRIME.wreck * 0.5);
   }
 
-  /** 建筑受伤。hp 归零就夷为平地：碰撞、屋顶、遮挡都消失，本局内不再恢复（重开游戏才恢复） */
+  /** 建筑受伤。hp 归零就夷为平地：碰撞、屋顶、遮挡都消失；60~180 秒后自动重建（见 updateRebuilds），每栋独立随机 */
   damageBuilding(b, dmg) {
     if (b.destroyed || dmg <= 0) return;
     b.hp -= dmg;
+    if (this.net) this.net.onBuildingChanged(b);   // 联机：血量变了就记下来，下一轮广播出去
     if (b.hp > 0) return;
     b.hp = 0; b.destroyed = true;
+    b.rebuildAt = this.time + 60 + Math.random() * 120;   // 均匀随机 60~180 秒后重建
+    this.rebuildQueue.push(b);
     this.emit({ type: 'buildingDown', b });
+  }
+
+  /** 有没有步行的玩家正好在某栋楼的占地里（重建会压到人就不能重建）。载具不再挡重建：废墟上的车到时间直接炸掉，
+   * 主角坐着的车推到楼外（见 rebuildBuilding）；坐车里的玩家不单独算，位置就是车的位置。
+   * 行人不挡：重建时把他们推出去。飞在楼顶上方的不算：高度超过楼顶 0.5 米就不挡，和 world.collide 的“从楼顶上方飞过”同一条线 */
+  footprintOccupied(b) {
+    const top = b.y0 + b.h + 0.5, p = this.player;
+    if (!p.inVeh && p.y < top && p.x > b.x0 - PLAYER.radius && p.x < b.x1 + PLAYER.radius && p.z > b.z0 - PLAYER.radius && p.z < b.z1 + PLAYER.radius) return true;
+    return false;
+  }
+
+  /** 一栋楼重建：状态回满、废墟消失、画面和小地图靠 buildingUp 事件恢复（见 view.js / hud.js）。
+   * 占地里的车：重建那一刻直接炸掉，走现有的 Vehicle.explode 摧毁路径（残骸 + 爆炸火光/烟尘/音效，和被炸毁时一样），
+   * 必须在楼恢复之前炸——爆炸本身会伤楼，楼这时还是废墟，damageBuilding 对已炸平的楼直接返回，刚重建好的楼不会被波及；
+   * 空车都炸（警车、交通车也一样，追捕系统会重新派车）。主角坐着的车不炸：楼恢复后再用 world.collide 把它（连同车里的主角）
+   * 推到最近的边缘外，复用行人推出那套机制；玩家位置下一帧跟着车同步（见 update）。
+   * 行人如果还在占地里，用 world.collide 把他们推到最近的边缘外：平时走路的行人每步都会被 collide 推出建筑，
+   * 但发呆的行人不走路，不在这里推就永远卡在楼里。 */
+  rebuildBuilding(b) {
+    const top = b.y0 + b.h + 0.5;
+    let mine = null;
+    for (const v of this.vehicles) {
+      if (!v.alive || v.sunk || v.y >= top) continue;   // 飞在楼顶上方的不算，和 footprintOccupied 同一条线
+      const cx = clamp(v.x, b.x0, b.x1), cz = clamp(v.z, b.z0, b.z1);
+      if (Math.hypot(v.x - cx, v.z - cz) >= v.radius) continue;   // 只有占地范围真正重叠的车才受影响
+      if (v === this.player.inVeh) { mine = v; continue; }
+      v.explode();
+    }
+    b.destroyed = false; b.hp = b.maxHp; b.rebuildAt = 0;
+    if (this.net) this.net.onBuildingChanged(b);   // 联机：重建状态也要广播出去，不然晚加入的人永远读到旧的“已炸平”
+    if (mine) this.world.collide(mine, mine.radius, mine.y);
+    for (const o of this.peds) {
+      if (!o.alive) continue;
+      if (o.x > b.x0 - o.r && o.x < b.x1 + o.r && o.z > b.z0 - o.r && o.z < b.z1 + o.r) this.world.collide(o, o.r, o.y);
+    }
+    this.emit({ type: 'buildingUp', b });
+    // 提示只在 150 米内弹、1 秒内最多一次：一次爆炸能炸掉好几栋楼，重建时间又各自随机，不节流会刷屏
+    const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+    if (Math.hypot(cx - this.player.x, cz - this.player.z) < 150 && this.time - this.rebuildToastT >= 1) {
+      this.rebuildToastT = this.time;
+      this.toast(`${b.name || '建筑'}已重建`);
+    }
+  }
+
+  /** 每帧扫一遍等重建的队：到时间就重建；占地里有步行的玩家就延后 5 秒再看，直到人离开。
+   * 车不再挡重建：废墟上的车到时间直接炸掉，主角坐着的车推到楼外（见 rebuildBuilding）。
+   * 计时用游戏时间 this.time：暂停（loop.timeScale = 0）时 sim.update 不跑，计时自动冻结。 */
+  updateRebuilds() {
+    const q = this.rebuildQueue;
+    for (let i = q.length - 1; i >= 0; i--) {
+      const b = q[i];
+      if (!b.destroyed) { q.splice(i, 1); continue; }   // 已经从远端同步恢复了：不用再重建一遍（不然会白白炸掉占地里的车）
+      if (this.time < b.rebuildAt) continue;
+      if (this.footprintOccupied(b)) { b.rebuildAt = this.time + 5; continue; }   // 有步行的玩家站在废墟上：等 5 秒再看，别把楼重建在人身上
+      q.splice(i, 1);
+      this.rebuildBuilding(b);
+    }
+  }
+  /** 联机：应用远端同步来的建筑状态。只改状态、发事件，不再重复扣血、不回写（回写是 Net 的事） */
+  applyRemoteBuilding(i, hp, destroyed) {
+    const b = this.world.buildings[i];
+    if (!b) return;
+    if (b.hp === hp && b.destroyed === destroyed) return;
+    const wasDestroyed = b.destroyed;
+    b.hp = hp; b.destroyed = destroyed;
+    if (destroyed && !wasDestroyed) {
+      this.emit({ type: 'buildingDown', b, remote: true });
+      // 远端炸掉的楼，本地也排一个重建计时（和 damageBuilding 同一个 60~180 秒范围）：
+      // 炸楼的人掉线了也没关系，在线的任何人到时间都会重建、把恢复写回库里，晚加入的人最多 3 分钟内看到楼回来
+      if (!b.rebuildAt) { b.rebuildAt = this.time + 60 + Math.random() * 120; this.rebuildQueue.push(b); }
+    }
+    else if (!destroyed && wasDestroyed) this.emit({ type: 'buildingUp', b, remote: true });
+  }
+
+  /** 联机：应用远端同步来的固定载具状态（键是 fixed-序号）。非固定车（交通车、警车）不同步，这里直接忽略 */
+  applyRemoteVehicle(key, d) {
+    if (!d || typeof d.x !== 'number') return;
+    const m = /^fixed-(\d+)$/.exec(key);
+    if (!m) return;
+    const f = this.fixedSpawns[Number(m[1])];
+    if (!f || !f.v) return;
+    if (this.net && d.driver === this.net.uid) return;   // 自己的车：本地物理说了算，不接受自己的回声
+    let v = f.v;
+    // 本地这辆已经是残骸、远端却是好的：说明远端那边补位重生了，本地也换一辆新的
+    if (!v.alive && typeof d.hp === 'number' && d.hp > 0) {
+      const i = this.vehicles.indexOf(v);
+      if (i >= 0) this.vehicles.splice(i, 1);
+      v = this.addVehicle(f.type, f.x, f.z, f.yaw, f.color); v.fixed = true; v.free = f.free; f.v = v;
+    }
+    v.px = v.x; v.py = v.y; v.pz = v.z; v.pyaw = v.yaw;   // 留上一帧位置给渲染插值
+    v.x = d.x; v.z = d.z; if (typeof d.y === 'number') v.y = d.y; v.yaw = d.yaw;
+    if (typeof d.hp === 'number') {
+      if (d.hp <= 0 && v.alive) {
+        // 远端炸毁了：本地直接变残骸，不再本地引爆一次（不然爆炸会再伤一遍周围的楼和车）
+        v.hp = 0; v.alive = false; v.wreck = true; v.burning = false; v.speed = 0; v.vx = v.vz = 0;
+        if (v.driver === 'player') this.exitVehicle(true);
+      } else v.hp = d.hp;
+    }
+    // 司机已经不在联机里了（掉线），就当没司机；有人开的车本地不跑物理，等远端的位置
+    const driver = (d.driver && d.driver !== '' && this.net && this.net.remotePlayers.has(d.driver)) ? d.driver : '';
+    v.driver = driver; v.remoteDriven = driver !== '';
   }
 
   /* ------------------------------------------------------------ 行人、警察、帮派 */
@@ -765,6 +883,7 @@ export class Sim {
     const p = this.player, c = this.ctl;
     this.updatePlayer(dt);
     for (const v of this.vehicles) {
+      if (v.remoteDriven) continue;   // 联机：别人开的固定车位置由远端同步，本地不跑物理（不然会和网络位置打架）
       const ctl = v.driver === 'player' ? c : v.ai && v.driver ? this.drive(v, dt) : NOCTL;
       v.update(dt, v.driver === 'player' && p.dead ? NOCTL : ctl);
     }
@@ -775,6 +894,7 @@ export class Sim {
     this.spawnTraffic(dt);
     this.spawnPeds(dt);
     this.updateWanted(dt);
+    this.updateRebuilds();
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const k = this.pickups[i];
       if (k.t > 0) k.t -= dt;

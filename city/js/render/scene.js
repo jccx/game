@@ -7,6 +7,7 @@ import { SIZE, PITCH, ROAD, CITY_Y, CURB, AIRPORT, BASE, RUNWAY, terrainY } from
 
 const CHUNK = 320;
 export const FOG_COLOR = 0xf3c7a2;       // 傍晚的暖色雾，和天空地平线同色
+const ZONE_COLOR = { downtown: '#b0b3b8', commercial: '#bdb7aa', residential: '#86b074', industrial: '#a39c8e', park: '#5fa050', farm: '#b0bc6c' };   // 小地图上各街区的底色（paintMap 和 mapBuildingColor 共用）
 
 /** 路面贴图：沥青、两侧白线、中间黄色虚线 */
 function roadTexture() {
@@ -369,7 +370,7 @@ export function paintMap(world, px) {
   }
   c.putImageData(img, 0, 0);
   c.scale(k, k);
-  const ZC = { downtown: '#b0b3b8', commercial: '#bdb7aa', residential: '#86b074', industrial: '#a39c8e', park: '#5fa050', farm: '#b0bc6c' };
+  const ZC = ZONE_COLOR;
   for (const b of world.blocks) { c.fillStyle = ZC[b.zone]; c.fillRect(b.x0, b.z0, b.x1 - b.x0, b.z1 - b.z0); }
   c.fillStyle = '#9a9ea6'; c.fillRect(AIRPORT[0], AIRPORT[1], AIRPORT[2] - AIRPORT[0], AIRPORT[3] - AIRPORT[1]);
   c.fillStyle = '#34373e'; c.fillRect(RUNWAY.x - RUNWAY.w / 2, RUNWAY.z0, RUNWAY.w, RUNWAY.z1 - RUNWAY.z0);
@@ -385,4 +386,18 @@ export function paintMap(world, px) {
   }
   const p = world.places.pier; c.fillStyle = '#8a6a48'; c.fillRect(p.x0, p.z0, p.x1 - p.x0, p.z1 - p.z0);
   return cv;
+}
+
+/**
+ * 小地图上某栋楼本来的颜色：paintMap 里那层 rgba(60,56,52,.75) 盖在街区底色上的混合结果，算成不透明色返回。
+ * 重建时直接把废墟色盖回去用——不能拿半透明色往废墟色上盖，盖完还是废墟色。
+ * 地标直接是金色 #d8a020。楼不在任何街区里时按 downtown 底色算。
+ */
+export function mapBuildingColor(world, b) {
+  if (b.kind === 'landmark') return '#d8a020';
+  const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+  const blk = world.blocks.find((k) => cx >= k.x0 && cx < k.x1 && cz >= k.z0 && cz < k.z1);
+  const zc = ZONE_COLOR[blk ? blk.zone : 'downtown'];
+  const zr = parseInt(zc.slice(1, 3), 16), zg = parseInt(zc.slice(3, 5), 16), zb = parseInt(zc.slice(5, 7), 16);
+  return `rgb(${Math.round(60 * 0.75 + zr * 0.25)},${Math.round(56 * 0.75 + zg * 0.25)},${Math.round(52 * 0.75 + zb * 0.25)})`;
 }

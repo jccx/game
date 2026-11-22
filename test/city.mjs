@@ -23,7 +23,7 @@ for (const vname of quick ? ['landscape'] : ['landscape', 'portrait']) {
   check(Math.hypot(b.x - a.x, b.z - a.z) > 0.8, `${vname} 推摇杆后人物移动了 ${Math.hypot(b.x - a.x, b.z - a.z).toFixed(1)} 米`, log);
   // 走到车旁：出现“上车”键，点它上车
   await page.evaluate(() => { const s = window.__city.sim, p = s.player, v = s.vehicles.find((o) => o.type === 'sedan' && o.fixed); p.x = p.px = v.x + 2.6; p.z = p.pz = v.z; });
-  await sleep(700);
+  await page.waitForFunction(() => { const b = document.querySelector('.k-top'); return b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 0; }, { timeout: 15000 }).catch(() => null);
   const en = await center(page, '.k-top');
   check(en.vis, `${vname} 走到车旁出现“上车”键`, log);
   await page.touchscreen.tap(en.x, en.y); await sleep(600);
@@ -44,6 +44,16 @@ for (const vname of quick ? ['landscape'] : ['landscape', 'portrait']) {
   check(e.god, `${vname} 点“无敌”后打开`, log);
   await page.touchscreen.tap(ch.x, ch.y); await sleep(300);
   check(!(await st()).god, `${vname} 再点一下关闭`, log);
+  // 码头边上船：下车后瞬移到码头边，出现“上车”键，点它上船（2026-11-21：船原来系在 11 米外，码头边按上车够不着）
+  await page.evaluate(() => { const s = window.__city.sim, p = s.player, pier = s.world.places.pier; if (p.inVeh) s.exitVehicle(); const b = s.vehicles.find((o) => o.type === 'boat'); const cx = Math.min(Math.max(b.x, pier.x0), pier.x1), cz = Math.min(Math.max(b.z, pier.z0), pier.z1); p.x = p.px = cx; p.z = p.pz = cz; p.y = 2; });
+  await page.waitForFunction(() => { const b = document.querySelector('.k-top'); return b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 0; }, { timeout: 15000 }).catch(() => null);
+  const en2 = await center(page, '.k-top');
+  check(en2.vis, `${vname} 站在码头边出现“上车”键`, log);
+  await page.touchscreen.tap(en2.x, en2.y); await sleep(600);
+  const cb = await st();
+  check(cb.veh === 'boat', `${vname} 点“上车”后坐进快艇`, log);
+  await shot(page, `city-${vname}-boat`);
+  await page.evaluate(() => { const s = window.__city.sim; if (s.player.inVeh) s.exitVehicle(); });
   // 拖动右半屏转镜头
   const yaw0 = await page.evaluate(() => window.__city.view.camYaw);
   await page.touchscreen.touchStart(view.width * 0.6, view.height * 0.4); await page.touchscreen.touchMove(view.width * 0.6 + 80, view.height * 0.4); await sleep(200); await page.touchscreen.touchEnd();
@@ -105,9 +115,9 @@ if (!quick) {
     const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', view);
     await ready(page);
     await sleep(1200);
-    // 出生全武器：数字键 1~5 直接切
+    // 出生全武器：数字键 1~6 直接切
     const spawn = await page.evaluate(() => { const p = window.__city.sim.player; return { owned: p.owned.slice(), ammo: p.ammo.slice() }; });
-    check(spawn.owned.every(Boolean) && spawn.ammo[1] === 80 && spawn.ammo[4] === 6, `${name} 出生拥有全部 5 种武器（手枪 80 发、火箭筒 6 发）`, log);
+    check(spawn.owned.every(Boolean) && spawn.ammo[1] === 80 && spawn.ammo[4] === 6 && spawn.ammo[5] === 4, `${name} 出生拥有全部 6 种武器（手枪 80 发、火箭筒 6 发、烟花 4 发）`, log);
     // 注意：无头浏览器 rAF 会被节流，固定睡 200 毫秒可能等不到下一帧、按键还没被读到；改成等到武器真的切过去
     await page.keyboard.press('Digit3');
     await page.waitForFunction('window.__city.sim.player.weapon === 2', { timeout: 5000 }).catch(() => {});
@@ -117,6 +127,21 @@ if (!quick) {
     await page.waitForFunction('window.__city.sim.player.weapon === 4', { timeout: 5000 }).catch(() => {});
     w = await page.evaluate(() => window.__city.sim.player.weapon);
     check(w === 4, `${name} 按数字键 5 切到火箭筒`, log);
+    // 烟花：数字键 6 切过去，开一轮恰好 8 枚、只耗 1 发弹药
+    await page.keyboard.press('Digit6');
+    await page.waitForFunction('window.__city.sim.player.weapon === 5', { timeout: 5000 }).catch(() => {});
+    w = await page.evaluate(() => window.__city.sim.player.weapon);
+    check(w === 5, `${name} 按数字键 6 切到烟花`, log);
+    const r360 = await page.evaluate(() => {
+      const m = window.__city, s = m.sim, p = s.player;
+      p.hp = 100; p.godT = Infinity; p.weapon = 5; p.shootCd = 0;
+      m.hud.locked = true;   // 锁住真实输入，免得 readInput() 每帧覆盖 ctl.fire
+      s.ctl.aimYaw = 0; s.ctl.aimSet = true; s.ctl.fire = true;
+      const before = s.shots.length;
+      s.update(1 / 30); s.ctl.fire = false; m.hud.locked = false;
+      return { n: s.shots.length - before, ammo: p.ammo[5] };
+    });
+    check(r360.n === 8 && r360.ammo === 3, `${name} 烟花 开一轮齐射 8 枚、只耗 1 发弹药（剩 ${r360.ammo} 发）`, log);
     // 打空一把自动补满：只剩 1 发时开一枪
     const refill = await page.evaluate(() => {
       const s = window.__city.sim, p = s.player;
@@ -406,6 +431,7 @@ if (!quick) {
       const [a, b] = dir;
       const car = s.vehicles.find((v) => v.type === 'sedan' && v.usable && !v.driver);
       car.x = cx + a * 15; car.z = cz + b * 15; car.y = w.groundY(car.x, car.z); car.yaw = Math.atan2(-a, -b); car.vx = 0; car.vz = 0; car.speed = 0;
+      for (const v of s.vehicles) if (v !== car) { v.x += 500; v.z += 500; v.vx = 0; v.vz = 0; v.speed = 0; }   // 清走路上的交通车：撞上会把车堵在 10-18 米（隔离复现 15.8 米），与废墟无关
       p.x = p.px = car.x + 2.5; p.z = p.pz = car.z; p.y = w.groundY(p.x, p.z);
       c.enter = true; s.update(1 / 30); s.events.length = 0;
       const entered = p.inVeh === car;
@@ -418,6 +444,95 @@ if (!quick) {
     await page.evaluate(() => { window.__city.view.camYaw += Math.PI; });   // 镜头转回身后，拍刚碾过的废墟
     await sleep(600);
     await shot(page, `city-rubble-${name}`);
+    // 重建：暂停时计时冻结；拨近重建时间后楼回来、耐久回满、小地图恢复
+    const reb = await page.evaluate((demo) => {
+      const m = window.__city, s = m.sim;
+      const house = s.world.buildings.find((b) => b.kind === 'house' && Math.abs((b.x0 + b.x1) / 2 - demo.cx) < 1 && Math.abs((b.z0 + b.z1) / 2 - demo.cz) < 1);
+      const t0 = s.time;
+      m.loop.timeScale = 0;   // 暂停
+      return { t0, destroyed: house.destroyed, rebuildAt: house.rebuildAt };
+    }, demo);
+    await sleep(1500);   // 真实时间过去 1.5 秒，暂停时游戏时间不应该动
+    const paused = await page.evaluate((reb) => {
+      const m = window.__city, s = m.sim;
+      const frozen = s.time === reb.t0;
+      m.loop.timeScale = 1;   // 恢复
+      return { frozen, time: s.time };
+    }, reb);
+    check(reb.destroyed && paused.frozen, `${name} 暂停时重建计时冻结（游戏时间停在 ${reb.t0.toFixed(1)} 秒没动，楼还是废墟）`, log);
+    const reb2 = await page.evaluate((demo) => {
+      const m = window.__city, s = m.sim;
+      const house = s.world.buildings.find((b) => b.kind === 'house' && Math.abs((b.x0 + b.x1) / 2 - demo.cx) < 1 && Math.abs((b.z0 + b.z1) / 2 - demo.cz) < 1);
+      const delay = house.rebuildAt - s.time;
+      house.rebuildAt = s.time + 0.5;   // 手动把重建时间拨近（随机 60~180 秒的等待本身逻辑测试已测）
+      let waited = 0;
+      while (house.destroyed && waited < 15) { m.loop.fastForward(1); waited += 1; }   // 占地里有步行的玩家时会延后 5 秒再试：等到重建为止，最多 15 秒，别写死 3 秒（车不再挡重建，见下面的 rebCars）
+      const up = s.events.some((e) => e.type === 'buildingUp');
+      return { delay, destroyed: house.destroyed, hp: house.hp, maxHp: house.maxHp, up, waited };
+    }, demo);
+    check(reb2.delay > 0 && reb2.delay <= 180, `${name} 炸平后重建时间还剩 ${reb2.delay.toFixed(0)} 秒（原始抽值 60~180 秒，见逻辑测试；这里测的是剩余时间，炸楼到测量之间已经过了几秒）`, log);
+    check(!reb2.destroyed && reb2.hp === reb2.maxHp && reb2.up, `${name} 重建后楼回来了（耐久回满 ${reb2.hp}，等了 ${reb2.waited} 秒，buildingUp 事件已发）`, log);
+    // 等小地图重画：buildingUp 事件要等下一帧渲染才消费（fastForward 不跑渲染），无头下帧率不稳，固定等 1.2 秒有时不够，改成等到像素变色为止
+    await page.waitForFunction((demo) => {
+      const m = window.__city, s = m.sim;
+      const house = s.world.buildings.find((b) => b.kind === 'house' && Math.abs((b.x0 + b.x1) / 2 - demo.cx) < 1 && Math.abs((b.z0 + b.z1) / 2 - demo.cz) < 1);
+      const k = m.hud.mapImg.width / 1600, cx = (house.x0 + house.x1) / 2, cz = (house.z0 + house.z1) / 2;
+      return m.hud.mapImg.getContext('2d').getImageData(Math.round(cx * k), Math.round(cz * k), 1, 1).data[0] > 65;
+    }, { timeout: 15000, polling: 200 }, demo).catch(() => null);
+    const rebPx = await page.evaluate((demo) => {
+      const m = window.__city, s = m.sim;
+      const house = s.world.buildings.find((b) => b.kind === 'house' && Math.abs((b.x0 + b.x1) / 2 - demo.cx) < 1 && Math.abs((b.z0 + b.z1) / 2 - demo.cz) < 1);
+      const k = m.hud.mapImg.width / 1600, cx = (house.x0 + house.x1) / 2, cz = (house.z0 + house.z1) / 2;
+      const px = m.hud.mapImg.getContext('2d').getImageData(Math.round(cx * k), Math.round(cz * k), 1, 1).data;
+      return [px[0], px[1], px[2]];
+    }, demo);
+    check(rebPx[0] > 65, `${name} 小地图上楼的颜色恢复了（中心点 rgb(${rebPx.join(',')})，废墟是 58,54,50）`, log);
+    await shot(page, `city-rebuilt-${name}`);
+    // 重建新规则：废墟上的空车重建时炸掉；主角坐着的车无敌、被推到楼外（拆楼直接调 damageBuilding，拆楼本身前面已测过）
+    const rebCars = await page.evaluate((demo) => {
+      const m = window.__city, s = m.sim, p = s.player, w = s.world;
+      const house = s.world.buildings.find((b) => b.kind === 'house' && Math.abs((b.x0 + b.x1) / 2 - demo.cx) < 1 && Math.abs((b.z0 + b.z1) / 2 - demo.cz) < 1);
+      const cx = demo.cx, cz = demo.cz;
+      const out = {};
+      // 先测主角的车：把楼再拆一次，坐进停在废墟上的车，等重建
+      if (p.inVeh) s.exitVehicle(true);
+      p.hp = 100; p.godT = Infinity;
+      s.damageBuilding(house, 99999);
+      let car = s.vehicles.find((v) => v.type === 'sedan' && v.usable && !v.driver);
+      if (!car) car = s.addVehicle('sedan', cx, cz, 0);
+      car.x = cx; car.z = cz; car.y = w.groundY(cx, cz); car.yaw = 0; car.vx = 0; car.vz = 0; car.speed = 0; car.parked = true;
+      p.x = p.px = car.x + 2.5; p.z = p.pz = car.z; p.y = w.groundY(p.x, p.z);
+      s.ctl.enter = true; s.update(1 / 30); s.events.length = 0;
+      out.entered = p.inVeh === car;
+      const hp0 = car.hp;
+      house.rebuildAt = s.time + 0.5;
+      let waited = 0;
+      while (house.destroyed && waited < 15) { m.loop.fastForward(1); waited += 1; }
+      const eps = 1e-6;
+      out.mine = {
+        rebuilt: !house.destroyed, hp: house.hp, maxHp: house.maxHp,
+        alive: car.alive, hpCar: car.hp, hp0, inVeh: p.inVeh === car,
+        outside: car.x <= house.x0 - car.radius + eps || car.x >= house.x1 + car.radius - eps || car.z <= house.z0 - car.radius + eps || car.z >= house.z1 + car.radius - eps,
+      };
+      // 再测空车：把楼又拆一次，废墟上放一辆空车，等重建
+      if (p.inVeh) s.exitVehicle(true);
+      p.x = p.px = cx + 30; p.z = p.pz = cz; p.y = w.groundY(p.x, p.z);   // 玩家走开，免得挡住重建
+      s.damageBuilding(house, 99999);
+      let car2 = s.vehicles.find((v) => v.type === 'sedan' && v.usable && !v.driver && v !== car);
+      if (!car2) car2 = s.addVehicle('sedan', cx, cz, 0);
+      car2.x = cx; car2.z = cz; car2.y = w.groundY(cx, cz); car2.yaw = 0; car2.vx = 0; car2.vz = 0; car2.speed = 0; car2.parked = true;
+      house.rebuildAt = s.time + 0.5;
+      waited = 0;
+      while (house.destroyed && waited < 15) { m.loop.fastForward(1); waited += 1; }
+      out.empty = { rebuilt: !house.destroyed, alive: car2.alive, wreck: car2.wreck };
+      return out;
+    }, demo);
+    check(rebCars.entered, `${name} 重建新规则：玩家坐进了停在废墟上的车`, log);
+    check(rebCars.mine.rebuilt && rebCars.mine.hp === rebCars.mine.maxHp, `${name} 主角坐着的车不挡重建：楼回来了（耐久回满）`, log);
+    check(rebCars.mine.alive && rebCars.mine.hpCar === rebCars.mine.hp0 && rebCars.mine.inVeh, `${name} 主角坐着的车没炸、没掉血，玩家还在车里`, log);
+    check(rebCars.mine.outside, `${name} 主角坐着的车被推到了楼外`, log);
+    check(rebCars.empty.rebuilt && !rebCars.empty.alive && rebCars.empty.wreck, `${name} 废墟上的空车在重建时炸掉了（残骸），楼照常回来`, log);
+    await shot(page, `city-rebuild-cars-${name}`);
     // 行人密度：先走到市中心（机场附近没有街区，行人不生成），再快进 60 秒；同时记逻辑帧耗时
     const dens = await page.evaluate(() => {
       const m = window.__city, s = m.sim, p = s.player;

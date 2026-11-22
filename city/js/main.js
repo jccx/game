@@ -44,5 +44,5 @@ function start() {
 document.addEventListener('visibilitychange', () => { if (document.hidden && sim) store.set('city-save', sim.save()); });
 
 // 调试/测试入口：控制台里 __city.sim 是游戏状态；地址栏加 ?fresh=1 忽略存档
-window.__city = { get sim() { return sim; }, get view() { return view; }, get hud() { return hud; }, get loop() { return loop; }, stage, start };
+window.__city = { get sim() { return sim; }, get view() { return view; }, get hud() { return hud; }, get net() { return hud && hud.net; }, get loop() { return loop; }, stage, start };
 start();

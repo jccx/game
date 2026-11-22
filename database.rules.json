@@ -1,0 +1,65 @@
+{
+  "rules": {
+    // 读：任何匿名登录的玩家都能读全部联机状态（玩家位置、建筑、载具都对所有人可见）。
+    // 写：根目录不放宽，写权限只在下面各节点单独给；没列出来的路径默认拒绝。
+    ".read": "auth != null",
+
+    // players/{uid}：只有 uid 本人能写自己的节点。新建时必须一次写齐必填字段；
+    // 之后用 update() 改个别字段也可以（规则按合并后的值校验）。
+    "players": {
+      "$uid": {
+        ".write": "auth.uid === $uid",
+        ".validate": "newData.hasChildren(['name', 'x', 'y', 'z', 'yaw', 'hp', 'money', 'weapon', 'updatedAt'])",
+        "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+        "x": { ".validate": "newData.isNumber()" },
+        "y": { ".validate": "newData.isNumber()" },
+        "z": { ".validate": "newData.isNumber()" },
+        "yaw": { ".validate": "newData.isNumber()" },
+        "hp": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "money": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "weapon": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "vehicle": { ".validate": "newData.isString()" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // names/{名字}：值就是占用的玩家 uid。只能由本人占用空名字、或释放自己占的名字；
+    // 别人占着的名字写不进来，重名靠这一条挡。
+    "names": {
+      "$name": {
+        ".write": "(!data.exists() && newData.val() === auth.uid) || (data.val() === auth.uid && (newData.val() === auth.uid || !newData.exists()))",
+        ".validate": "newData.isString() || !newData.exists()"
+      }
+    },
+
+    // buildings/{序号}：任何登录玩家都能更新 hp / destroyed（炸楼、重建都要走这里），
+    // 但不能删节点、不能加别的字段；hp 只能是数字，destroyed 只能是布尔值。
+    "buildings": {
+      "$index": {
+        ".write": "auth != null && newData.exists()",
+        ".validate": "newData.hasChildren(['hp', 'destroyed'])",
+        "hp": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "destroyed": { ".validate": "newData.isBoolean()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // vehicles/{id}：任何登录玩家都能更新位置、朝向、血量和驾驶员（开车、炸车都要走这里），
+    // 不能删节点、不能加别的字段。y 是直升机/飞机高度，地面载具不用写。
+    "vehicles": {
+      "$id": {
+        ".write": "auth != null && newData.exists()",
+        ".validate": "newData.hasChildren(['type', 'x', 'z', 'yaw', 'hp'])",
+        "type": { ".validate": "newData.isString()" },
+        "x": { ".validate": "newData.isNumber()" },
+        "y": { ".validate": "newData.isNumber()" },
+        "z": { ".validate": "newData.isNumber()" },
+        "yaw": { ".validate": "newData.isNumber()" },
+        "hp": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "driver": { ".validate": "newData.isString()" },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
