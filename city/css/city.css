@@ -71,7 +71,7 @@
 .cbox > .g-b { flex: none; align-self: center; min-width: calc(var(--u) * 30); }
 
 /* ---------- 联机 ---------- */
-.net-status { padding: calc(var(--u) * .8) calc(var(--u) * 2); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); color: #9aa7c2; font-weight: 700; font-size: calc(var(--u) * 2.6); }
+.net-status { padding: calc(var(--u) * .8) calc(var(--u) * 2); border-radius: 999px; background: rgba(8,12,22,.62); border: 1px solid var(--line); color: #9aa7c2; font-weight: 700; font-size: calc(var(--u) * 2.6); cursor: pointer; }   /* 在线时点一下打开排行榜 */
 .net-status.on { color: #4ade80; border-color: #4ade80; }
 .net-row { display: flex; gap: calc(var(--u) * 2); align-items: center; }
 .net-input { flex: 1 1 auto; min-width: 0; padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4); border-radius: calc(var(--u) * 1.6); border: 1px solid var(--line); background: rgba(255,255,255,.07); color: #e9eefb; font-size: calc(var(--u) * 3.4); }
@@ -79,6 +79,9 @@
 .net-err { color: #ff6a6a; font-size: calc(var(--u) * 2.8); min-height: calc(var(--u) * 3.6); }
 .net-players { display: flex; flex-direction: column; gap: calc(var(--u) * 1); font-size: calc(var(--u) * 3); color: #aab5cf; }
 .net-players b { color: #e9eefb; }
+.net-myscore { font-size: calc(var(--u) * 3); color: #4ade80; font-weight: 700; }
+.net-board { display: flex; flex-direction: column; gap: calc(var(--u) * 1); font-size: calc(var(--u) * 3); color: #aab5cf; margin-top: calc(var(--u) * 1); }
+.net-board b { color: #e9eefb; }
 .wlabel.net-name { background: rgba(10,40,20,.82); border-color: #4ade80; color: #4ade80; }
 
 /* ---------- 竖屏 ---------- */

@@ -54,7 +54,7 @@ export const WEAPON_INDEX = Object.fromEntries(WEAPONS.map((w, i) => [w.id, i]))
 export const AMMO = [Infinity, 80, 150, 24, 6, 4];
 
 /** 玩家 */
-export const PLAYER = { speed: 6.5, swim: 2.6, radius: 0.45, hp: 100, enterDist: 4.2, pickupDist: 1.8 };
+export const PLAYER = { speed: 6.5, swim: 2.6, radius: 0.45, hp: 100, enterDist: 4.2, pickupDist: 1.8, runMul: 3, runCap: 40, runRefill: 1, runResume: 5 };
 
 /** 行人与警察 */
 export const PED = { walk: 1.5, run: 5.6, hp: 40, count: 36, spawnMin: 45, spawnMax: 110, despawn: 150 };   // 平民行人上限 36（2026-11-21 从 18 翻倍；渲染 MAX_PED 是 48，不用改）

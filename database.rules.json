@@ -19,9 +19,185 @@
         "money": { ".validate": "newData.isNumber() && newData.val() >= 0" },
         "weapon": { ".validate": "newData.isNumber() && newData.val() >= 0" },
         "vehicle": { ".validate": "newData.isString()" },
+        // v2：通缉星（0~5，警察追谁就看它）和是否死亡（可选字段，老客户端没有也不影响）
+        "stars": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5" },
+        "dead": { ".validate": "newData.isBoolean()" },
+        // 跑步标志（0/1，同步给别人看跑步姿态；可选）
+        "run": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1" },
         "updatedAt": { ".validate": "newData.isNumber()" },
         "$other": { ".validate": false }
       }
+    },
+
+    // env/{房主uid}：只有房主本人能写自己的快照（离线清理靠 onDisconnect，删节点也要本人才能删）。
+    // peds/cars 是数组（写进来是带数字键的对象），只校验顶层结构，数组里每一项的形状由客户端代码保证。
+    "env": {
+      "$uid": {
+        ".write": "auth.uid === $uid",
+        ".validate": "newData.hasChildren(['t', 'peds'])",
+        "t": { ".validate": "newData.isNumber()" },
+        "peds": { ".validate": "newData.hasChildren()" },
+        "cars": { ".validate": "newData.hasChildren()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // shots/{uid}/{序号}：只有本人能写自己的开火事件（写完自己删旧的，所以删也要本人才能删）。
+    // 序号补零到 8 位，字典序就是时间序。
+    "shots": {
+      "$uid": {
+        "$seq": {
+          ".write": "auth.uid === $uid",
+          ".validate": "newData.hasChildren(['kind', 'x', 'y', 'z', 'dx', 'dy', 'dz', 'speed', 'radius', 'range', 'hx', 'hy', 'hz', 't'])",
+          "kind": { ".validate": "newData.isString()" },
+          "x": { ".validate": "newData.isNumber()" },
+          "y": { ".validate": "newData.isNumber()" },
+          "z": { ".validate": "newData.isNumber()" },
+          "dx": { ".validate": "newData.isNumber()" },
+          "dy": { ".validate": "newData.isNumber()" },
+          "dz": { ".validate": "newData.isNumber()" },
+          "speed": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "radius": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "range": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "hx": { ".validate": "newData.isNumber()" },
+          "hy": { ".validate": "newData.isNumber()" },
+          "hz": { ".validate": "newData.isNumber()" },
+          "t": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    // hits/{受害uid}/{序号}：别人才能新建（自己不能给自己写伤害），新建时 from 必须是写的人；
+    // 受害者才能删（收到后删掉，避免重连后重复扣血）。
+    "hits": {
+      "$victim": {
+        "$seq": {
+          ".write": "(auth.uid !== $victim && newData.exists() && newData.child('from').val() === auth.uid) || (auth.uid === $victim && !newData.exists())",
+          ".validate": "newData.hasChildren(['from', 'fromName', 'dmg', 'src', 'weapon', 't'])",
+          "from": { ".validate": "newData.isString()" },
+          "fromName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+          "dmg": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 400" },
+          "src": { ".validate": "newData.isString()" },
+          "weapon": { ".validate": "newData.isString()" },
+          "t": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    // pdmg/{key}：路人伤害请求，任何登录玩家都能写（非房主打镜像行人时发），房主结算后删。
+    // 删也放给任何登录玩家（房主身份是“uid 最小”，规则里算不出来，只能信任客户端删自己的那条）。
+    "pdmg": {
+      "$key": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['by', 'id', 'dmg', 'fromX', 'fromZ', 't'])",
+        "by": { ".validate": "newData.isString()" },
+        "id": { ".validate": "newData.isNumber()" },
+        "dmg": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 400" },
+        "fromX": { ".validate": "newData.isNumber()" },
+        "fromZ": { ".validate": "newData.isNumber()" },
+        "t": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // vdmg/{key}：车辆伤害请求，任何登录玩家都能写（非房主打镜像交通车/警车时发），房主结算后删。
+    // 和 pdmg 一样：房主身份是“uid 最小”，规则里算不出来，只能信任客户端删自己的那条。
+    "vdmg": {
+      "$key": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['by', 'id', 'dmg', 't'])",
+        "by": { ".validate": "newData.isString()" },
+        "id": { ".validate": "newData.isNumber()" },
+        "dmg": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 400" },
+        "t": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // ptake/{key}：拾取物领取请求，任何登录玩家都能写（非房主捡镜像拾取物时发），房主结算后删。
+    // 房主批了才在快照里写 by，请求方看到 by 是自己才生效（一个拾取物只生效一次，不怕重复请求）。
+    "ptake": {
+      "$key": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['by', 'key', 't'])",
+        "by": { ".validate": "newData.isString()" },
+        "key": { ".validate": "newData.isString()" },
+        "t": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // missions/{id}：共享任务状态。一个任务同一时间只能一个人做（抢的时候用 transaction，规则拦不住并发抢，
+    // 靠 transaction 的原子性）；进度和载具/靶车由做任务的人写；失败/离开时删掉，别人马上能抢。
+    // vehicle 是任务载具的位置（只有新生成的那辆才发，reuse 的固定车走固定车同步）；targets 是摧毁任务的靶车血量。
+    "missions": {
+      "$id": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['by', 'byName', 'state', 't'])",
+        "by": { ".validate": "newData.isString()" },
+        "byName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+        "state": { ".validate": "newData.val() === 'active' || newData.val() === 'done'" },
+        "cp": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "left": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "text": { ".validate": "newData.isString()" },
+        "t": { ".validate": "newData.isNumber()" },
+        "vehicle": {
+          ".validate": "newData.val() === null || newData.hasChildren(['type', 'x', 'y', 'z', 'yaw', 'hp'])",
+          "type": { ".validate": "newData.isString()" },
+          "x": { ".validate": "newData.isNumber()" },
+          "y": { ".validate": "newData.isNumber()" },
+          "z": { ".validate": "newData.isNumber()" },
+          "yaw": { ".validate": "newData.isNumber()" },
+          "hp": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "driver": { ".validate": "newData.isString()" },
+          "$other": { ".validate": false }
+        },
+        "targets": { ".validate": "newData.val() === null || newData.isObject()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // scores/{周一日期}/{名字}：排行榜。每周一 00:00（芝加哥时间）换周，旧周数据不删也不显示。
+    // kills/deaths 只能由 transaction 写：新建是 1，之后每次只能 +1，不能减少、不能一下加很多。
+    "scores": {
+      "$week": {
+        "$name": {
+          "kills": {
+            ".write": "auth != null && newData.exists() && ((!data.exists() && newData.val() === 1) || (data.exists() && newData.val() === data.val() + 1))",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+          },
+          "deaths": {
+            ".write": "auth != null && newData.exists() && ((!data.exists() && newData.val() === 1) || (data.exists() && newData.val() === data.val() + 1))",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000"
+          },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+
+    // feed/{序号}：击杀播报，任何登录玩家都能写一条（受害方记分时写），各客户端只留最近 20 条、多出来的删掉。
+    "feed": {
+      "$seq": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['killer', 'victim', 't'])",
+        "killer": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+        "victim": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+        "t": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // godMode：全员无敌共享开关（单节点 {on, by, t}）。任何登录玩家都能拨动，规则只校验字段；
+    // 开的时候所有在线玩家都不掉血（hurtPlayer 里挡，和单机无敌一个口子）；不保车，只保人。
+    "godMode": {
+      ".write": "auth != null",
+      ".validate": "newData.hasChildren(['on', 'by', 't'])",
+      "on": { ".validate": "newData.isBoolean()" },
+      "by": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 20" },
+      "t": { ".validate": "newData.isNumber()" },
+      "$other": { ".validate": false }
     },
 
     // names/{名字}：值就是占用的玩家 uid。只能由本人占用空名字、或释放自己占的名字；

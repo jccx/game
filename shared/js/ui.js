@@ -81,18 +81,21 @@ export function toast(msg, ms = 1800) {
 
 /**
  * 把页面高度钉在“实际可见区域”的高度上，写进 CSS 变量 --app-h。
- * 有些手机浏览器的工具栏会盖住屏幕底部，按 100vh 排版时最下面一截看不到。
+ * 用布局视口高度（window.innerHeight），不要用 visualViewport.height：
+ * 手机浏览器显示地址栏/工具栏时 visualViewport 会变矮（还可能带 offsetTop），
+ * 按它排版会把游戏区缩短，屏幕上下露出机身底色黑边（2026-11-22 竖屏黑边问题）。
+ * 布局视口就是整块屏幕：工具栏出现时它只会短暂盖住底部，手指一碰就自动收起，
+ * 而 HUD 的上下控件本来就按安全区（--st/--sb）留了边距。
+ * 虚拟键盘是例外：键盘会盖住布局视口，那种情况由 attachKeyboardFit
+ *（html.kbd 规则 + --vv-h）单独处理，和这里不冲突。
  */
 export function fitViewport() {
   const set = () => {
-    const vv = window.visualViewport;
-    const h = vv ? Math.min(window.innerHeight, vv.height) : window.innerHeight;
-    document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+    document.documentElement.style.setProperty('--app-h', Math.round(window.innerHeight) + 'px');
   };
   set();
   window.addEventListener('resize', set);
   window.addEventListener('orientationchange', () => setTimeout(set, 150));
-  window.visualViewport?.addEventListener('resize', set);
 }
 
 /** 游戏页面通用：禁止双击缩放、长按菜单、文字选中、橡皮筋滚动；并让页面高度跟随可见区域 */
@@ -120,3 +123,39 @@ export function query(name, def = null) {
 
 /** 当前是否竖屏 */
 export const isPortrait = () => window.innerHeight > window.innerWidth;
+
+/**
+ * 虚拟键盘弹起时算可视区域（纯函数，测试用）：vv 是 visualViewport（或同形状的假对象），
+ * innerHeight 是布局视口高度。返回 {top, height, kbdH}：可视区域相对布局视口的顶边、
+ * 高度、键盘占掉的高度（没有键盘时 kbdH 是 0）。
+ */
+export function keyboardViewport(vv, innerHeight) {
+  if (!vv) return { top: 0, height: innerHeight, kbdH: 0 };
+  const height = Math.max(0, Math.round(Math.min(innerHeight, vv.height)));
+  return { top: Math.max(0, Math.round(vv.offsetTop || 0)), height, kbdH: Math.max(0, Math.round(innerHeight - vv.height)) };
+}
+
+/**
+ * 键盘让位：输入框聚焦、虚拟键盘弹起时，把游戏画面缩到键盘上方的可视区域，
+ * 让输入框和它旁边的按钮不被键盘盖住；失焦或面板关掉就恢复。
+ * 做法：聚焦时给 <html> 加 kbd class，并把可视区域写进 --vv-top / --vv-h（见 base.css 的 html.kbd 规则）；
+ * 键盘开合、屏幕滚动都会触发 visualViewport 的 resize/scroll，跟着刷新。失焦时清掉。
+ * 没有 visualViewport 的环境（桌面浏览器）不做任何事。
+ * @param {HTMLInputElement|HTMLTextAreaElement} input
+ * @returns {()=>void} 拆掉监听的函数（面板关闭时调；输入框本身被一起删掉时 blur 也会清掉 class，再调一次也无害）
+ */
+export function attachKeyboardFit(input) {
+  const root = document.documentElement;
+  const vv = window.visualViewport;
+  if (!vv || !input) return () => {};
+  const apply = () => {
+    const r = keyboardViewport(vv, window.innerHeight);
+    root.style.setProperty('--vv-top', r.top + 'px');
+    root.style.setProperty('--vv-h', r.height + 'px');
+  };
+  const onFocus = () => { root.classList.add('kbd'); apply(); vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); try { input.scrollIntoView({ block: 'nearest' }); } catch { /* 忽略 */ } };
+  const onBlur = () => { root.classList.remove('kbd'); root.style.removeProperty('--vv-top'); root.style.removeProperty('--vv-h'); vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); };
+  input.addEventListener('focus', onFocus);
+  input.addEventListener('blur', onBlur);
+  return () => { input.removeEventListener('focus', onFocus); input.removeEventListener('blur', onBlur); onBlur(); };
+}

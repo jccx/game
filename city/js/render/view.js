@@ -82,7 +82,7 @@ export class View {
 
   layout() {
     const s = this.stage, cam = this.camera;
-    cam.aspect = s.aspect; cam.fov = s.portrait ? 74 : 58;
+    cam.aspect = s.aspect; cam.fov = s.portrait ? 78 : 58;   // 竖屏 78°：修掉黑边后画面变高、横向视野会收窄，适当放宽补回来
     cam.updateProjectionMatrix();
     this.fire.setViewport(s.height, cam.fov, s.pixelRatio); this.smoke.setViewport(s.height, cam.fov, s.pixelRatio);
     this.far = s.level === 0 ? 520 : s.level === 1 ? 700 : 950;                // 画质越低看得越近，省性能
@@ -287,7 +287,7 @@ export class View {
     let aL = 0, aR = 0, lL = 0, lR = 0, lean = 0, fall = 0;
     if (p.dead) fall = Math.min(1, p.deadT * 2.5);
     else if (p.swim) { lean = 1.15; const s = Math.sin(this.time * 6); aL = -2.2 + s * 0.8; aR = -2.2 - s * 0.8; lL = s * 0.4; lR = -s * 0.4; }
-    else if (p.moving) { this.plPhase += dt * 11; const s = Math.sin(this.plPhase); lL = s * 0.85; lR = -s * 0.85; aL = -s * 0.6; aR = s * 0.6; lean = 0.1; }
+    else if (p.moving) { this.plPhase += dt * clamp(p.speed * 1.7, 0, 34); const s = Math.sin(this.plPhase); lL = s * 0.85; lR = -s * 0.85; aL = -s * 0.6; aR = s * 0.6; lean = p.running ? 0.2 : 0.1; }   // 摆腿频率按实际速度算：步行 6.5 米/秒约 11，跑步 19.5 米/秒约 33
     const armed = p.weapon > 0;
     if (!p.dead && !p.swim && this.plAtkT < 0.35) aR = armed ? -1.5 : -1.5 + Math.sin(this.plAtkT / 0.35 * Math.PI) * -0.8;       // 举枪 / 出拳
     pl.gun.visible = armed && !p.swim && !p.dead;
@@ -344,9 +344,9 @@ export class View {
       const sp = dt > 0 ? Math.hypot(x - vw.lx, z - vw.lz) / dt : 0;
       vw.lx = x; vw.lz = z;
       let aL = 0, aR = 0, lL = 0, lR = 0;
-      if (sp > 0.5) { vw.phase += dt * 11; const s = Math.sin(vw.phase); lL = s * 0.85; lR = -s * 0.85; aL = -s * 0.6; aR = s * 0.6; }
+      if (sp > 0.5) { vw.phase += dt * clamp(sp * 1.7, 0, 34); const s = Math.sin(vw.phase); lL = s * 0.85; lR = -s * 0.85; aL = -s * 0.6; aR = s * 0.6; }   // 摆腿频率按插值出来的实际速度算：跑步的远端玩家自然摆得更快
       if (rp.weapon > 0) aR = -1.5;   // 拿着枪
-      this.pose(x, y, z, rp.yaw, 0, 0, aL, aR, lL, lR, (name, m) => { vw.parts[name].matrix.copy(m); if (name === 'armR') vw.parts.gun.matrix.copy(m); });
+      this.pose(x, y, z, rp.yaw, rp.run ? 0.12 : 0, rp.dead ? 1 : 0, aL, aR, lL, lR, (name, m) => { vw.parts[name].matrix.copy(m); if (name === 'armR') vw.parts.gun.matrix.copy(m); });   // 死掉的远端玩家躺下（联机 v2：dead 字段同步过来了）；跑步时身体前倾一点（run 标志同步过来了，摆腿频率本来就按实际速度算）
       vw.parts.gun.visible = rp.weapon > 0;
       this.addShadow(x, y, z, 1.4);
       // 名字标签：250 米内、镜头前才显示

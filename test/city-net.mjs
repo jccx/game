@@ -1,6 +1,10 @@
-// 落日湾联机的浏览器测试：两个无头标签页同时加入、重名被拒、甲炸楼乙看到、重建后楼恢复。
+// 落日湾联机的浏览器测试：两个无头标签页同时加入、重名被拒、甲炸楼乙看到、重建后楼恢复、
+// 点“联机 N 人”打开排行榜、全员无敌共享开关。
 // 注意：测的是真数据库、真共享地图（和正式玩家同一张地图）：炸的是一栋普通民居，重建（60~180 秒）会把它恢复；
 // 名字用 testA-/testB- 加随机后缀，测完断开就释放，页面关闭时 onDisconnect 也会清理。
+// 注意：Firebase 的 web API key 已被限制为只允许 https://jccx.github.io/* 来源（2026-11-22），
+// 所以本文件从 localhost 跑会在登录时被拒——这是限制在起作用，不是 bug。跑真库验证要改走 Pages 域名
+//（本地 HTTPS + --host-resolver-rules="MAP jccx.github.io 127.0.0.1" 之类的办法），或等部署后再测。
 // Chrome 要经过沙盒 egress 代理才能上 gstatic CDN：本文件自带一个本地 CONNECT 中继（test/relay.mjs），
 // 浏览器启动参数里加 --proxy-server 指到中继，--ignore-certificate-errors 绕过代理的 TLS 拦截。
 // 用法：CHROME=~/workspace/.tmp/chrome-headless-shell-linux64/chrome-headless-shell node test/city-net.mjs
@@ -130,6 +134,41 @@ try {
   check(true, '重建后乙那边楼恢复了', log);
   const backA = await pageA.evaluate((i) => window.__city.sim.world.buildings[i].destroyed === false, idx);
   check(backA, '重建后甲那边楼也恢复了', log);
+
+  // ---- 7) 点“联机 N 人”打开排行榜 ----
+  await pageA.bringToFront();
+  await pageA.waitForFunction(() => { const e = document.querySelector('.net-status'); return e && e.textContent.includes('联机'); }, { timeout: 15000, polling: 500 });
+  await pageA.click('.net-status');
+  await pageA.waitForFunction(() => { const b = document.querySelector('.net-board'); return b && b.textContent.includes('本周排行榜'); }, { timeout: 15000, polling: 500 });
+  const boardTxt = await pageA.evaluate(() => document.querySelector('.net-board').textContent);
+  check(boardTxt.includes('本周排行榜'), '点“联机 N 人”打开了排行榜面板', log);
+  check(boardTxt.includes('还没有击杀') || boardTxt.includes('杀'), '排行榜面板里有榜单内容（还没击杀就显示空榜）', log);
+  await pageA.evaluate(() => window.__city.hud.closeOverlay());
+
+  // ---- 8) 全员无敌共享开关：甲拨动，乙也无敌、打不掉血；关了恢复 ----
+  await pageA.bringToFront();
+  await pageA.evaluate(() => window.__city.hud.openNet());
+  const godBtn = () => pageA.evaluate(() => {
+    const b = [...document.querySelectorAll('.cnet .g-b')].find((x) => x.textContent.startsWith('全员无敌'));
+    if (!b) return null;
+    b.click();
+    return b.textContent;
+  });
+  await pageA.waitForFunction(() => [...document.querySelectorAll('.cnet .g-b')].some((x) => x.textContent.startsWith('全员无敌')), { timeout: 15000, polling: 500 });
+  await godBtn();
+  await pageB.bringToFront();
+  await pageB.waitForFunction(() => { const n = window.__city.net; return n && n.god === true; }, { timeout: 30000, polling: 500 });
+  check(true, '甲拨动全员无敌，乙那边开关也开了', log);
+  const blocked = await pageB.evaluate(() => { const s = window.__city.sim; s.player.hp = 100; s.hurtPlayer(50); return s.player.hp; });
+  check(blocked === 100, `全员无敌开着，乙被打不掉血（hp=${blocked}）`, log);
+  await pageA.bringToFront();
+  await godBtn();
+  await pageB.bringToFront();
+  await pageB.waitForFunction(() => { const n = window.__city.net; return n && n.god === false; }, { timeout: 30000, polling: 500 });
+  check(true, '甲再拨一次，乙那边开关也关了', log);
+  const hurt = await pageB.evaluate(() => { const s = window.__city.sim; s.player.hp = 100; s.hurtPlayer(50); return s.player.hp; });
+  check(hurt < 100, `关掉后伤害又生效了（hp=${hurt}）`, log);
+  await pageA.evaluate(() => window.__city.hud.closeOverlay());
 
   // ---- 6) 断开 ----
   await pageA.evaluate(async () => window.__city.hud.leaveNet());

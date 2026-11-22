@@ -61,6 +61,16 @@ function buildList(w) {
   ];
 }
 
+/** 摧毁任务的靶车位置：任务点附近的路口（按离任务点的距离排，取第 3~12 个）。纯函数，世界是固定种子，
+ * 所以所有客户端算出来都一样——房主发靶车血量时，别人按同样位置生成镜像靶车，只同步血量/死活。 */
+export function targetSpots(sim, def) {
+  const m = def;
+  const nodes = sim.world.roadNodes.slice().sort((x, y) => Math.hypot(x.x - m.at[0], x.z - m.at[1]) - Math.hypot(y.x - m.at[0], y.z - m.at[1]));
+  const spots = [];
+  for (let k = 2; k < 2 + m.count && k < nodes.length; k++) spots.push([nodes[k].x + 3, nodes[k].z + 3, k]);
+  return spots;
+}
+
 export class Missions {
   constructor(sim, done) {
     this.sim = sim;
@@ -68,6 +78,9 @@ export class Missions {
     this.list = buildList(sim.world);
     this.active = null;      // 进行中的任务状态
     this.cool = 2;           // 刚结束任务后的短暂冷却，避免站在光圈里立刻重开
+    this._claimPending = null;   // 联机：正在抢的任务 id（等 transaction 回来）
+    this._claimCool = {};        // 联机：刚抢失败的任务 id -> 下次能抢的时间（游戏时间）
+    this._takenToastT = 0;       // 联机：上次提示“别人正在做”的时间（游戏时间，节流）
   }
 
   /** 界面要显示的内容：进行中任务的名字、当前目标文字、剩余时间、目标位置 */
@@ -78,7 +91,27 @@ export class Missions {
     if (!this.active) {
       if ((this.cool -= dt) > 0 || p.dead) return;
       if (p.inVeh && Math.abs(p.inVeh.speed) > 4) return;
-      for (const m of this.list) if (Math.hypot(p.x - m.at[0], p.z - m.at[1]) < 3.4) { this.start(m); break; }
+      for (const m of this.list) {
+        if (Math.hypot(p.x - m.at[0], p.z - m.at[1]) >= 3.4) continue;
+        if (!sim.net) { this.start(m); break; }
+        // 联机：一个任务同一时间只能一个人做，先抢（transaction）再开始；别人正在做就提示，不开始
+        const st = sim.net.missionStates.get(m.id);
+        if (st && st.state === 'active' && st.by !== sim.net.uid) {
+          if (sim.time - this._takenToastT > 5) { this._takenToastT = sim.time; sim.emit({ type: 'mission', what: 'taken', name: m.name, byName: st.byName }); }
+          break;
+        }
+        if (this._claimPending === m.id) break;   // 正在抢，等结果回来
+        if ((this._claimCool[m.id] || 0) > sim.time) break;   // 刚抢失败，冷却 5 秒
+        this._claimPending = m.id;
+        sim.net.claimMission(m.id).then((ok) => {
+          this._claimPending = null;
+          if (!ok) { this._claimCool[m.id] = sim.time + 5; return; }
+          // 抢到了：人还在光圈附近才开始（走远了就把任务放掉，别占着）
+          if (Math.hypot(sim.player.x - m.at[0], sim.player.z - m.at[1]) < 10) this.start(m);
+          else sim.net.releaseMission(m.id);
+        });
+        break;
+      }
       return;
     }
     const a = this.active;
@@ -103,9 +136,8 @@ export class Missions {
     if (m.guards) for (const [x, z] of m.guards) { const o = sim.addPed('gang', x, z); o.mission = true; a.foes.push(o); }
     if (m.type === 'destroy') {
       sim.wantedLock = true; sim.clearWanted();
-      // 靶车：摆在任务点附近的路口上
-      const nodes = sim.world.roadNodes.slice().sort((x, y) => Math.hypot(x.x - m.at[0], x.z - m.at[1]) - Math.hypot(y.x - m.at[0], y.z - m.at[1]));
-      for (let k = 2; k < 2 + m.count && k < nodes.length; k++) { const t = sim.addVehicle('target', nodes[k].x + 3, nodes[k].z + 3, k); t.mission = true; a.targets.push(t); }
+      // 靶车：摆在任务点附近的路口上（位置是确定的，见 targetSpots，别人按同样位置生成镜像）
+      for (const [x, z, yaw] of targetSpots(sim, m)) { const t = sim.addVehicle('target', x, z, yaw); t.mission = true; a.targets.push(t); }
     }
     sim.emit({ type: 'mission', what: 'start', name: m.name, desc: m.desc });
   }
@@ -168,17 +200,56 @@ export class Missions {
   win() {
     const a = this.active, sim = this.sim;
     if (!a) return;
-    const first = !this.done.has(a.def.id), reward = first ? a.def.reward : Math.round(a.def.reward * 0.4);
-    this.done.add(a.def.id);
+    const id = a.def.id;
+    const first = !this.done.has(id), reward = first ? a.def.reward : Math.round(a.def.reward * 0.4);
+    this.done.add(id);
     this.cleanup();
     sim.addMoney(reward);
     sim.emit({ type: 'mission', what: 'win', name: a.def.name, reward, first });
+    sim.net?.setMissionDone(id);   // 联机：任务完成写回共享节点（别人看到“已完成”，可以再抢着重玩）
   }
 
   fail(reason) {
     const a = this.active;
     if (!a) return;
+    const id = a.def.id;
     this.cleanup();
     this.sim.emit({ type: 'mission', what: 'fail', name: a.def.name, reason });
+    this.sim.net?.releaseMission(id);   // 联机：任务失败就放掉，别人马上能抢
+  }
+
+  /** 联机：别人正在做的摧毁任务——按同样位置生成镜像靶车，只同步血量/死活（state.targets 是 [[hp, alive], ...]）。
+   * 靶车是静态的，不用插值；任务结束（节点没了或 done）时清掉。 */
+  syncRemoteTargets(def, targets) {
+    const sim = this.sim;
+    if (!this._remoteTargets) this._remoteTargets = new Map();
+    let list = this._remoteTargets.get(def.id);
+    if (!list) {
+      list = targetSpots(sim, def).map(([x, z, yaw]) => {
+        const t = sim.addVehicle('target', x, z, yaw);
+        t.mission = true; t.missionId = def.id; t.remoteDriven = true;
+        return t;
+      });
+      this._remoteTargets.set(def.id, list);
+    }
+    if (Array.isArray(targets)) {
+      list.forEach((t, i) => {
+        const st = targets[i];
+        if (!st) return;
+        const [hp, alive] = st;
+        t.hp = hp;
+        if (alive && !t.alive) { t.alive = true; t.wreck = false; }
+        else if (!alive && t.alive) { t.alive = false; t.wreck = true; t.burning = false; t.speed = 0; t.vx = t.vz = 0; }
+      });
+    }
+  }
+
+  /** 联机：清掉某个任务的镜像靶车（任务结束或被人接手后重开时，旧镜像先清掉再按新状态生成）。 */
+  clearRemoteTargets(id) {
+    if (!this._remoteTargets) return;
+    const list = this._remoteTargets.get(id);
+    if (!list) return;
+    for (const t of list) { const i = this.sim.vehicles.indexOf(t); if (i >= 0) this.sim.vehicles.splice(i, 1); }
+    this._remoteTargets.delete(id);
   }
 }

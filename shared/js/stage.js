@@ -52,6 +52,16 @@ export class Stage {
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', () => setTimeout(onResize, 120));
     window.visualViewport?.addEventListener('resize', onResize);
+    // 旋转兜底（2026-11-22）：真机转屏时 orientationchange 在转屏动画开始就触发，
+    // resize 可能只在动画中途触发一次、之后不再触发，上面两路都可能读到旧尺寸——
+    // 画布缓冲停在横屏尺寸、CSS 盒子已经是竖屏，画面就被横向挤压。
+    // ResizeObserver 按布局尺寸触发：容器（100vw × --app-h）一变就重算，
+    // 和事件时序无关。键盘弹起/收起改 .g-root 高度时它同样会跟上，和键盘让位不打架。
+    // setSize(updateStyle=false) 不改容器 CSS 尺寸，所以不会自己触发自己。
+    if (typeof ResizeObserver !== 'undefined') {
+      this._ro = new ResizeObserver(onResize);
+      this._ro.observe(container);
+    }
     this.resize();
   }
 

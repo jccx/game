@@ -90,3 +90,14 @@
 - 四批合进主副本：烟花（§16）、建筑重建（§17）、重建新规则（§18）、码头上船（§19）、联机（net.js/net-firebase.js/database.rules.json/test/city-net-sim.mjs/test/city-net.mjs/test/relay.mjs）。主副本相对 e4b474a：15 个文件 +955/−44，另 7 个联机新文件未追踪。任务发布者名字标签修了一行（view.js:443，`''` 改 `'block'`）。
 - 2026-11-21 22:27 用户取消每半小时 reset 地图规则：net.js/net-firebase.js 里的 reset 定时、抢权、提醒、meta 读写，sim.js 的 resetWorldState，hud.js 的 reset 提醒 UI，database.rules.json 的 meta 块，README 与计划文件里的 reset 描述，测试里的 reset 节，全删。被炸的楼改靠 60~180 秒自动重建恢复：rebuildBuilding 把恢复状态同步到库；收到远端已炸的楼时本地也排一个 60~180 秒重建计时；updateRebuilds 里远端已恢复的楼直接出队。database.rules.json 改完要去 Firebase 控制台重新粘贴发布一次。
 - 验证：逻辑测试 city-sim 306、city-net-sim 48、kart 23、artillery 20、park 81、moba 3、citymap 9、park-perf 6，全过；浏览器测试 city.mjs 253/253、city-net.mjs 15/15、hub 9/9，全过。等用户批准再推送。
+
+## 9. 2026-11-22：联机 v2（进行中，未推送；基座 e0095238）
+
+- 范围：路人/警察/交通车/任务/拾取物/子弹全同步（房主制，uid 最小者当房主，环境快照 2Hz）、PvP 互杀、每周排行榜（周一 00:00 芝加哥时间清零，保留）、键盘让位（所有输入框）、跑步模式（3 倍速，令牌桶预算）、竖屏铺满 + 转屏不挤压、离开立即释放名字、点“联机 N 人”开排行榜、全员无敌共享开关。
+- 关键文件：`city/js/net.js`、`city/js/net-firebase.js`、`city/js/sim.js`、`city/js/missions.js`、`city/js/hud.js`、`city/js/render/view.js`（竖屏 FOV 78°）、`shared/js/ui.js`（fitViewport 改用 innerHeight、attachKeyboardFit）、`shared/js/stage.js`（ResizeObserver 兜底转屏）、`shared/css/base.css`（.kbd）、`database.rules.json`（新增 env/shots/hits/pdmg/vdmg/ptake/missions/scores/feed/godMode，players 加 stars/dead/run）。
+- 注意：Firebase 的 web API key 已被限制为只允许 `https://jccx.github.io/*` 来源——localhost 跑 `test/city-net.mjs` 会在登录时被拒（限制在起作用，不是 bug），真库浏览器验证要走 Pages 域名。逻辑测试用内存 mock（`test/city-net-sim.mjs`），不受影响。
+- 排行榜按名字认人：名字释放后别人重用，落在同一行、继承它的分（合并，不清零）——2026-11-22 01:49 用户定：保持合并，不改。
+- 跑步预算是令牌桶（2026-11-22 01:49 用户定，替代严格滚动窗口）：桶 40 秒，跑动每秒扣 1 秒、步行每秒回 1 秒（`PLAYER.runRefill = 1`），站着不动不扣也不回；扣空强制步行并锁死，走路回满 5 秒（`PLAYER.runResume = 5`）才解锁再跑。60 秒里最多能跑约 50 秒。测试 §15 按令牌桶断言；浏览器 city.mjs 加了跑步段（速度、扣桶、角标、变灰、解锁）。
+- 2026-11-22 后续补的系统性逻辑测试：city-net-sim §13 房主选举（含重选和镜像接手）、§14 环境快照（路人/警察/交通车/拾取物领取/子弹/任务抢占与进度）、§15 跑步模式（令牌桶）。city-net-sim 现 132 项。
+- database.rules.json 改完要去 Firebase 控制台重新粘贴发布一次（新增 godMode 等节点）。
+- 推送前要用户批准；v2 已合进主副本，待推送。

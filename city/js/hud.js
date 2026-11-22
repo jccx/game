@@ -2,13 +2,13 @@
 // 手机：左下摇杆（步行时移动；开车时左右转向，上下也可以当油门/刹车；开飞机时上下是俯仰）；
 //      在屏幕右半边空白处拖动可以转镜头；右下是动作键（步行：攻击、上车、换武器；开车：油门、刹车、手刹、下车、开炮）。
 // 电脑：WASD 移动/驾驶，按住鼠标拖动转镜头，空格 攻击/手刹，F 上下车，Q 换武器，J 攻击/车上发火箭筒（坦克炮是空格或“开炮”键），↑↓ 飞机俯仰/直升机升降，M 地图，Esc 设置。
-import { el, toast, toggleFullscreen, store, makeMemo, makeCheatButton } from '../../shared/js/ui.js';
+import { el, toast, toggleFullscreen, store, makeMemo, makeCheatButton, attachKeyboardFit } from '../../shared/js/ui.js';
 import { Joystick, ActionButton, DragPad } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
 import { qualityRow, soundRow } from '../../shared/js/settings.js';
 import { fmtTime, clamp } from '../../shared/js/util.js';
 import { QUALITY } from '../../shared/js/stage.js';
-import { WEAPONS, VEH } from './config.js';
+import { WEAPONS, VEH, PLAYER } from './config.js';
 import { SIZE, RUNWAY, BASE } from './world.js';
 import { paintMap, mapBuildingColor } from './render/scene.js';
 import { Net, validName } from './net.js';
@@ -25,6 +25,7 @@ const IC = {
   hand: svg('<circle cx="12" cy="12" r="8"/><path d="M12 8v5M12 16v.5"/>'),
   fire: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>'),
   net: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15.5 0 18M12 3c-2.5 2.5-2.5 15.5 0 18"/>'),
+  run: svg('<path d="M4 5l7 7-7 7M12 5l7 7-7 7"/>'),   // 跑步：两个向右的箭头（快进）
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'),
 };
 
@@ -59,7 +60,7 @@ export class Hud {
     this.moneyEl = el('div', { cls: 'money', text: '$0' }, row);
     this.netBtn = el('div', { cls: 'g-ic', html: IC.net, on: { pointerdown: (e) => { e.preventDefault(); this.openNet(); } } }, row);
     el('div', { cls: 'g-ic', html: IC.gear, on: { pointerdown: (e) => { e.preventDefault(); this.openSettings(); } } }, row);
-    this.netEl = el('div', { cls: 'net-status', text: '' }, right);   // 联机状态：单机时不显示
+    this.netEl = el('div', { cls: 'net-status', text: '', on: { click: () => { if (this.net && this.net.status === 'online') this.openNet(true); } } }, right);   // 联机状态：单机时不显示；在线时点一下打开排行榜
     this.starsEl = el('div', { cls: 'stars' }, right);
     const bars = el('div', { cls: 'c-bars' }, right);
     this.hpEl = el('i', {}, el('div', { cls: 'c-hp' }, bars)); this.arEl = el('i', {}, el('div', { cls: 'c-ar' }, bars));
@@ -77,6 +78,7 @@ export class Hud {
     this.bAtk = new ActionButton(pad, { cls: 'k-main', icon: IC.fist, onDown: () => Sfx.unlock() });
     this.bEnter = new ActionButton(pad, { cls: 'k-top', icon: IC.car, label: '上车', onDown: one('enter') });
     this.bSwap = new ActionButton(pad, { cls: 'k-left', icon: IC.swap, label: '换武器', onDown: one('swap') });
+    this.bRun = new ActionButton(pad, { cls: 'k-mid', icon: IC.run, label: '跑步', onDown: () => Sfx.unlock() });   // 步行专用：按住跑（3 倍速），预算耗尽时变灰
     this.bGas = new ActionButton(pad, { cls: 'k-main', icon: IC.gas, label: '油门', onDown: () => Sfx.unlock() });
     this.bBrake = new ActionButton(pad, { cls: 'k-left', icon: IC.brake, label: '刹车' });
     this.bExit = new ActionButton(pad, { cls: 'k-top', icon: IC.door, label: '下车', onDown: one('enter') });
@@ -86,6 +88,10 @@ export class Hud {
   }
 
   toggleGod() {
+    const net = this.net;
+    // 联机时无敌是全员共享开关：任何人拨动都影响所有在线玩家（包括自己），走 godMode 节点；
+    // 单机时还是只管自己（本地 godT）。
+    if (net && net.status === 'online') { net.setGod(!net.god); return; }
     const p = this.sim.player;
     p.godT = p.godT > 0 ? 0 : Infinity;
     Sfx.play(p.godT > 0 ? 'levelup' : 'click');
@@ -114,11 +120,12 @@ export class Hud {
       const fx = Math.sin(cy), fz = Math.cos(cy);
       c.mx = fx * -jy - fz * jx; c.mz = fz * -jy + fx * jx;
       c.fire = this.bAtk.pressed || k.isDown('Space', 'KeyJ');
+      c.run = k.isDown('ShiftLeft', 'ShiftRight') || this.bRun.pressed;   // 跑步：按住 Shift（键盘）或跑步键（触屏），3 倍速；预算见 sim.runBudgetLeft
       c.rocket = false;   // 步行不发车载火箭，下车时不清会残留
       c.steer = 0; c.gas = 0; c.handbrake = false; c.pitch = 0;
       return;
     }
-    c.mx = 0; c.mz = 0;
+    c.mx = 0; c.mz = 0; c.run = false;   // 车上不跑步
     const plane = v.spec.cls === 'plane', heli = v.spec.cls === 'heli';
     c.steer = clamp(jx * 1.25, -1, 1);
     let gas = this.bGas.pressed ? 1 : this.bBrake.pressed ? -1 : 0;
@@ -187,6 +194,7 @@ export class Hud {
         else if (ev.what === 'win') { Sfx.play('win'); this.showBanner('任务完成', `${ev.name}　+$${ev.reward}${ev.first ? '' : '（重复完成，奖励减少）'}`, 'good', 4); this.saveT = 0.5; }
         else if (ev.what === 'fail') { Sfx.play('lose'); this.showBanner('任务失败', `${ev.name}：${ev.reason}`, 'bad', 4); }
         else if (ev.what === 'checkpoint') Sfx.play('beep');
+        else if (ev.what === 'taken') toast(`${ev.name}：${ev.byName}正在做`, 2500);   // 联机：别人正在做的任务，走进去也不会开始
         break;
     }
   }
@@ -223,7 +231,7 @@ export class Hud {
     set('ar', Math.ceil(p.armor), (x) => { this.arEl.style.width = x + '%'; this.arEl.parentNode.style.visibility = x > 0 ? '' : 'hidden'; });
     const wp = WEAPONS[p.weapon];
     set('wp', wp.name + (wp.melee ? '' : ' ' + p.ammo[p.weapon]), (x) => { this.wpEl.textContent = x; });
-    set('god', p.godT > 0, (x) => this.cheat.sync(x));
+    set('god', this.net && this.net.status === 'online' ? this.net.god : p.godT > 0, (x) => this.cheat.sync(x));
     // 联机状态：单机不显示；在线显示人数
     const net = this.net;
     set('net', !net ? '' : net.status === 'connecting' ? '连接中…' : net.status === 'online' ? `联机 ${1 + net.remotePlayers.size} 人` : net.status === 'failed' ? '联机未连接' : '', (x) => {
@@ -248,12 +256,14 @@ export class Hud {
     const cls = v ? v.spec.cls : '';
     set('mode', cls, () => {
       const foot = !v;
-      this.bAtk.show(foot); this.bSwap.show(foot);
+      this.bAtk.show(foot); this.bSwap.show(foot); this.bRun.show(foot);
       this.bGas.show(!foot); this.bBrake.show(!foot); this.bExit.show(!foot);
       this.bHand.show(!foot && (cls === 'car' || cls === 'bike')); this.bFire.show(!foot); this.bFire.setLabel(cls === 'tank' ? '开炮' : '火箭');   // 开炮键只在坦克上是开炮，其他车上是火箭筒
       this.bGas.setLabel(cls === 'heli' ? '上升' : '油门');   // 直升机上油门键改名“上升”，管升降；其他车上还是油门
       this.bBrake.setLabel(cls === 'heli' ? '下降' : cls === 'plane' ? '减速' : cls === 'boat' ? '倒船' : '刹车');   // 直升机上刹车键改名“下降”
     });
+    // 跑步预算指示（每 0.1 秒刷新）：预算耗尽锁死时跑步键变灰（强制步行），回满 5 秒才重新变亮；角标显示剩余秒数（满格时不显示）
+    if (!v) { const left = sim.runBudgetLeft(); this.bRun.setEnabled(sim.runReady()); this.bRun.setBadge(left >= PLAYER.runCap ? '' : Math.ceil(left) + 's'); }
     set('atkIcon', p.weapon > 0, (x) => this.bAtk.setIcon(x ? IC.gun : IC.fist));
     const near = !v && !p.dead ? sim.nearestVehicle() : null;
     set('near', near ? near.id : 0, () => { this.bEnter.show(!!near); if (near) this.bEnter.setLabel(near.driver === 'npc' ? '抢车' : '上车'); });
@@ -288,6 +298,14 @@ export class Hud {
     for (const v of sim.vehicles) if (v.alive && v.ai && v.ai.kind === 'chase') blip(v.x, v.z, ((sim.time * 4) | 0) % 2 ? '#ff4a4a' : '#4a8cff', 4);
     for (const kx of sim.pickups) if (kx.t <= 0 && kx.fixed) blip(kx.x, kx.z, kx.type === 'health' ? '#ff6a6a' : kx.type === 'star' ? '#ffe066' : kx.type === 'armor' ? '#6ab8ff' : '#ffb347', 2.5);
     const h = sim.missions.hud;
+    // 联机：别人正在做的任务，在雷达上标出他当前的检查点（或任务点），绿色方块
+    if (sim.net) for (const [id, st] of sim.net.missionStates) {
+      if (!st || st.state !== 'active' || st.by === sim.net.uid) continue;
+      const def = sim.missions.list.find((m) => m.id === id);
+      if (!def) continue;
+      const cp = def.cps && st.cp < def.cps.length ? def.cps[st.cp] : def.at;
+      blip(cp[0], cp[1], '#4ade80', 5, true);
+    }
     if (h && h.target) blip(h.target.x, h.target.z, '#3ae0ff', 6, true);
     else for (const m of sim.missions.list) {
       let dx = (m.at[0] - p.x) * k, dz = (m.at[1] - p.z) * k; const d = Math.hypot(dx, dz), max = S / 2 - 10;
@@ -304,7 +322,7 @@ export class Hud {
   }
 
   /* ---------------------------------------------------------- 弹出面板 */
-  closeOverlay() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
+  closeOverlay() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this._netKbdDetach) { this._netKbdDetach(); this._netKbdDetach = null; } if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
   openOverlay(cls) {
     this.closeOverlay();
     this.overlay = el('div', { cls: 'g-overlay ' + cls }, this.root);
@@ -332,7 +350,14 @@ export class Hud {
     x.translate(p.x * k, p.z * k); x.rotate(-p.yaw + Math.PI);
     x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, -12); x.lineTo(9, 10); x.lineTo(0, 5); x.lineTo(-9, 10); x.closePath(); x.fill(); x.stroke();
     const list = el('div', { cls: 'mlist g-scroll' }, body);
-    for (const m of sim.missions.list) el('div', { cls: 'mrow' + (sim.missions.done.has(m.id) ? ' done' : ''), html: `<i>${m.icon}</i><div><b>${m.name}　$${m.reward}</b><span>${m.desc}</span></div>` }, list);
+    for (const m of sim.missions.list) {
+      // 联机：别人正在做的任务标出来（谁在做、做到哪了）；做完了的标“已完成”
+      const st = sim.net && sim.net.missionStates.get(m.id);
+      const remote = st && st.state === 'active' && st.by !== (sim.net && sim.net.uid)
+        ? `　<span style="color:#4ade80">${st.byName}正在做${st.left > 0 ? `（还剩 ${st.left}）` : ''}</span>` : '';
+      const doneBy = st && st.state === 'done' ? `　<span style="color:#b0a060">${st.byName}已完成</span>` : '';
+      el('div', { cls: 'mrow' + (sim.missions.done.has(m.id) ? ' done' : ''), html: `<i>${m.icon}</i><div><b>${m.name}　$${m.reward}</b><span>${m.desc}${remote}${doneBy}</span></div>` }, list);
+    }
     el('button', { cls: 'g-b', text: '关闭', on: { click: () => this.closeOverlay() } }, box);
   }
 
@@ -342,30 +367,55 @@ export class Hud {
       case 'playerJoin': toast(`${ev.name}加入了落日湾`); break;
       case 'playerLeave': toast(`${ev.name}离开了`); break;
       case 'syncBlocked': toast(`联机同步被拒绝了（${ev.what}），请检查数据库规则`, 3000); break;
+      case 'killFeed': toast(`${ev.killer} 击杀了 ${ev.victim}`); break;
+      case 'godChange': toast(ev.on ? `${ev.by || '有人'}开启了全员无敌` : `${ev.by || '有人'}关闭了全员无敌`); break;
+      case 'hostChange': if (ev.isHost) toast('你现在是房主，路人和警察由你这边模拟'); break;
     }
   }
 
-  /** 联机面板：输名字、加入、看在线的人、断开 */
-  openNet() {
+  /** 联机面板：输名字、加入、看在线的人和本周排行榜、断开。focusBoard 为 true 时（从右上“联机 N 人”点进来）滚到排行榜。 */
+  openNet(focusBoard = false) {
     const box = this.openOverlay('cnet');
     el('div', { cls: 'cbox-head', html: '<b>联机模式</b><span>所有玩家共享同一张地图</span>' }, box);
     const saved = store.get('city-net-name', '');
     const row = el('div', { cls: 'net-row' }, box);
     const input = el('input', { cls: 'net-input', attrs: { type: 'text', maxlength: '20', placeholder: '输入你的名字（1~20 个字）', value: saved } }, row);
     const joinBtn = el('button', { cls: 'g-b', text: '加入联机' }, row);
+    // 键盘让位：输入框聚焦、虚拟键盘弹起时，游戏画面缩到键盘上方的可视区域（见 shared/js/ui.js 的 attachKeyboardFit）；
+    // 关面板时 closeOverlay 里拆掉监听、恢复全屏
+    this._netKbdDetach = attachKeyboardFit(input);
     const status = el('div', { cls: 'net-err', text: '' }, box);
     const list = el('div', { cls: 'net-players' }, box);
+    const myScore = el('div', { cls: 'net-myscore', text: '' }, box);
+    const board = el('div', { cls: 'net-board' }, box);
+    // 全员无敌开关：任何人都能拨动，影响所有在线玩家（见 Net.setGod）
+    const godBtn = el('button', { cls: 'g-b', text: '全员无敌：关' }, box);
+    godBtn.addEventListener('click', () => { if (this.net && this.net.status === 'online') this.net.setGod(!this.net.god); });
     const refresh = () => {
       const net = this.net;
-      const names = net && net.status === 'online'
+      const online = net && net.status === 'online';
+      const names = online
         ? [net.name + '（你）', ...[...net.remotePlayers.values()].map((rp) => rp.name)]
         : [];
       list.innerHTML = names.length
         ? `<b>在线 ${names.length} 人</b>` + names.map((n) => `<div>${n}</div>`).join('')
-        : '还没加入联机。加入后，你的位置、炸掉的楼、开着的车都会同步给其他玩家。';
-      joinBtn.textContent = net && net.status === 'online' ? '断开联机' : '加入联机';
+        : '还没加入联机。加入后，你的位置、炸掉的楼、开着的车、路人和警察都会同步给其他玩家；你也可以击杀其他玩家上榜。';
+      joinBtn.textContent = online ? '断开联机' : '加入联机';
+      // 本周排行榜（按杀数排，前 10 名；名字用 textContent 填，不拼 HTML）
+      const mine = online ? net.scores.get(net.name) : null;
+      myScore.textContent = mine ? `你本周：${mine.kills} 杀 / ${mine.deaths} 死` : '';
+      godBtn.style.display = online ? '' : 'none';
+      godBtn.textContent = online ? (net.god ? `全员无敌：开（${net.godBy || '?'}）` : '全员无敌：关') : '全员无敌：关';
+      board.innerHTML = '';
+      if (online) {
+        el('b', { text: `本周排行榜（${net.scoresWeek} 当周，每周一 00:00 清零）` }, board);
+        const rows = [...net.scores.entries()].sort((a, b) => b[1].kills - a[1].kills || a[1].deaths - b[1].deaths).slice(0, 10);
+        if (!rows.length) el('div', { text: '本周还没有击杀' }, board);
+        rows.forEach(([n, s], i) => el('div', { text: `${i + 1}. ${n}　${s.kills} 杀 / ${s.deaths} 死` }, board));
+      }
     };
     refresh();
+    if (focusBoard) { try { board.scrollIntoView({ block: 'nearest' }); } catch { /* 面板内部滚动，滚不到也不影响 */ } }
     this._netRefresh = setInterval(refresh, 1000);
     const close = () => { clearInterval(this._netRefresh); this._netRefresh = null; this.closeOverlay(); };
     joinBtn.addEventListener('click', async () => {
@@ -375,7 +425,7 @@ export class Hud {
       else { status.textContent = r.message || '加入失败'; refresh(); }
     });
     el('button', { cls: 'g-b ghost', text: '关闭', on: { click: close } }, box);
-    el('div', { cls: 'set-tip', text: '名字只要和同时在线的人不重名就行。行人、交通车、警察、任务和子弹是各玩各的，不同步。断网或数据库没连上时，游戏照常单机玩。' }, box);
+    el('div', { cls: 'set-tip', text: '名字只要和同时在线的人不重名就行。路人、警察、开火和击杀都会同步；排行榜按名字记，每周一 00:00 清零。断网或数据库没连上时，游戏照常单机玩。' }, box);
     input.focus();
   }
 

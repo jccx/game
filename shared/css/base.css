@@ -28,6 +28,9 @@ html, body {
 
 /* 铺满屏幕的根容器。高度优先用脚本量出来的可见高度 --app-h（见 ui.js 的 fitViewport），避免底部被浏览器工具栏盖住 */
 .g-root { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; height: 100dvh; height: var(--app-h, 100dvh); overflow: hidden; }
+/* 虚拟键盘弹起时（见 ui.js 的 attachKeyboardFit）：根容器跟可视区域走——高度是键盘上方的可见高度，
+   顶边是可视区域的顶边（浏览器把页面往上推时大于 0）。里面的面板自然落在键盘上方，不用改面板本身 */
+html.kbd .g-root { top: var(--vv-top, 0px); height: var(--vv-h, var(--app-h, 100dvh)); }
 .g-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
 
 /* HUD 层：本身不拦截触摸，只有里面的控件拦截 */

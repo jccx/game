@@ -107,6 +107,43 @@ if (!quick) {
   check(bad(errors).length === 0, `载具巡礼无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
   await page.close();
 }
+// 跑步模式（令牌桶，2026-11-22 01:49 用户定）：3 倍速，桶 40 秒，跑动扣、步行回，扣空强制步行（只在完整模式下）
+if (!quick) {
+  const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', VIEW.landscape);
+  await ready(page);
+  await sleep(1200);
+  const runState = () => page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player; return { speed: p.speed, running: p.running, left: s.runBudgetLeft(), ready: s.runReady(), badge: m.hud.bRun.badgeEl.textContent, off: m.hud.bRun.el.classList.contains('off') }; });
+  const freeze = () => page.evaluate(() => { const c = window.__city.sim.ctl; c.mx = 0; c.mz = 0; c.run = false; });
+  // 传到市中心人行道，锁住真实输入，由脚本直接给方向和跑步键（和载具巡礼一样用快进）
+  await page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player; if (p.inVeh) s.exitVehicle(true); p.hp = 100; const n = s.world.node(7, 7); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; m.hud.locked = true; });
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; c.run = true; m.loop.fastForward(1); });
+  let r = await runState();
+  check(r.running && r.speed > 18, `按住跑步跑起来了（${r.speed.toFixed(1)} 米/秒，约 3 倍步行）`, log);
+  check(Math.abs(r.left - 39) < 1, `跑 1 秒扣 1 秒预算（剩 ${r.left.toFixed(1)} 秒）`, log);
+  await freeze();
+  await sleep(600);   // 等 HUD 刷新角标（0.1 秒一刷）
+  r = await runState();
+  check(r.badge === '39s', `跑步键角标显示剩余 39s（实测“${r.badge}”）`, log);
+  // 跑满 40 秒扣空：每 0.5 秒传回原地（往北跑 30 秒会进河，水里不跑也不回桶），一锁死就停——不停的话锁死后每 chunk 还在走路回桶
+  await page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player, c = s.ctl; const n = s.world.node(7, 7); c.mx = 0; c.mz = -1; c.run = true; for (let i = 0; i < 90 && !s.runLocked; i++) { m.loop.fastForward(0.5); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; } });
+  r = await runState();
+  check(!r.running && r.speed < 7, '预算扣空后强制步行（还按着跑步键）', log);
+  check(r.left < 1, `扣空后桶里不到 1 秒（剩 ${r.left.toFixed(1)} 秒）`, log);
+  await freeze();
+  await sleep(600);
+  r = await runState();
+  check(r.off, '扣空后跑步键变灰（锁死期）', log);
+  // 走 6 秒回 6 秒，解锁，又能跑了
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; c.run = false; m.loop.fastForward(6); });
+  await sleep(600);   // 等 HUD 刷新跑步键（0.1 秒一刷，无头下帧率低，读早了按钮还是灰的）
+  r = await runState();
+  check(Math.abs(r.left - 6) < 1.5 && r.ready && !r.off, `走 6 秒回 6 秒预算，跑步键恢复（剩 ${r.left.toFixed(1)} 秒）`, log);
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.run = true; m.loop.fastForward(1); });
+  r = await runState();
+  check(r.running && r.speed > 18, '回满 5 秒解锁，又能跑了', log);
+  check(bad(errors).length === 0, `跑步流程无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
+  await page.close();
+}
 // 新功能：出生全武器、自动补满、直升机、行人密度——五种手机尺寸横竖屏（只在完整模式下）
 if (!quick) {
   const phone = (w, h) => ({ width: w, height: h, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -115,6 +152,38 @@ if (!quick) {
     const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', view);
     await ready(page);
     await sleep(1200);
+    // 竖屏铺满：画布必须盖满整个视口（2026-11-22：fitViewport 曾按 visualViewport 高度排版，
+    // 手机浏览器工具栏一出现就上下留黑边）。竖屏再模拟工具栏（visualViewport 变矮且顶边下移），
+    // 确认画布仍铺满——这是黑边的回归检查；同时确认竖屏 HUD 控件没有被裁到视口外。
+    const cover = await page.evaluate(async () => {
+      const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+      const full = () => { const c = rect('canvas.g-canvas'); return !!c && Math.abs(c.x) <= 1 && Math.abs(c.y) <= 1 && Math.abs(c.w - window.innerWidth) <= 1 && Math.abs(c.h - window.innerHeight) <= 1; };
+      const out = { base: full(), toolbar: null, restored: null, hud: null };
+      if (window.innerHeight > window.innerWidth) {
+        const fake = { width: window.innerWidth, height: Math.round(window.innerHeight * 0.83), offsetTop: Math.round(window.innerHeight * 0.08), offsetLeft: 0, scale: 1, addEventListener() {}, removeEventListener() {}, onresize: null, onscroll: null };
+        Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
+        window.dispatchEvent(new Event('resize'));
+        await new Promise((r) => setTimeout(r, 150));
+        out.toolbar = full();
+        delete window.visualViewport;   // 恢复原型上的真 visualViewport
+        window.dispatchEvent(new Event('resize'));
+        await new Promise((r) => setTimeout(r, 150));
+        out.restored = full();
+        out.hud = ['.g-joy', '.k-main', '.k-mid', '.k-left'].every((sel) => {
+          const e = document.querySelector(sel); if (!e) return false;
+          const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+          const b = e.getBoundingClientRect();
+          return b.width > 0 && b.left >= -1 && b.top >= -1 && b.right <= window.innerWidth + 1 && b.bottom <= window.innerHeight + 1;
+        });
+      }
+      return out;
+    });
+    check(cover.base, `${name} 画布铺满整个视口（无黑边）`, log);
+    if (cover.toolbar !== null) {
+      check(cover.toolbar, `${name} 模拟手机工具栏（visualViewport 变矮）后画布仍铺满`, log);
+      check(cover.restored, `${name} 工具栏消失后画布恢复铺满`, log);
+      check(cover.hud, `${name} 竖屏 HUD 控件（摇杆/开火/跑步/换武器）全部在视口内`, log);
+    }
     // 出生全武器：数字键 1~6 直接切
     const spawn = await page.evaluate(() => { const p = window.__city.sim.player; return { owned: p.owned.slice(), ammo: p.ammo.slice() }; });
     check(spawn.owned.every(Boolean) && spawn.ammo[1] === 80 && spawn.ammo[4] === 6 && spawn.ammo[5] === 4, `${name} 出生拥有全部 6 种武器（手枪 80 发、火箭筒 6 发、烟花 4 发）`, log);
@@ -546,6 +615,58 @@ if (!quick) {
     check(bad(errors).length === 0, `${name} 新功能流程无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
     await page.close();
   }
+}
+// 旋转：横屏玩一会儿 → 切竖屏 → 切回横屏（2026-11-22：转屏后画面被挤压的 bug，
+// 根因是转屏动画中途 resize 只触发一次、读到旧尺寸；Stage 里加了 ResizeObserver 按布局尺寸兜底）
+if (!quick) {
+  const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', VIEW.landscape);
+  await ready(page);
+  await sleep(1200);
+  await page.evaluate(() => window.__city.loop.fastForward(5));
+  await sleep(300);
+  const geom = () => page.evaluate(() => {
+    const s = window.__city.stage, v = window.__city.view;
+    const c = document.querySelector('canvas.g-canvas');
+    const r = c.getBoundingClientRect();
+    return {
+      css: [Math.round(r.width), Math.round(r.height)],
+      buf: [c.width, c.height],
+      camAspect: +v.camera.aspect.toFixed(3), camFov: v.camera.fov, dpr: s.pixelRatio,
+    };
+  });
+  const expectGeom = (g, w, h, fov, tag) => {
+    const expBuf = [Math.round(w * g.dpr), Math.round(h * g.dpr)];
+    check(Math.abs(g.css[0] - w) <= 1 && Math.abs(g.css[1] - h) <= 1, `${tag} 画布 CSS 盒子是 ${w}x${h}`, log);
+    check(g.buf[0] === expBuf[0] && g.buf[1] === expBuf[1], `${tag} 画布缓冲是 ${expBuf[0]}x${expBuf[1]}（没被挤压）`, log);
+    check(Math.abs(g.camAspect - w / h) < 0.01 && g.camFov === fov, `${tag} 相机宽高比 ${g.camAspect}、FOV ${g.camFov}°`, log);
+  };
+  let g = await geom();
+  expectGeom(g, 844, 390, 58, '旋转前横屏');
+  // 切竖屏
+  await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  await sleep(900);
+  g = await geom();
+  expectGeom(g, 390, 844, 78, '转竖屏后');
+  await shot(page, 'city-rotate-port');
+  // 模拟真机转屏的脏状态：缓冲被人停在横屏尺寸，只动容器布局（不动 window 事件），
+  // ResizeObserver 必须自己把它纠回来——这是转屏挤压的回归检查。
+  await page.evaluate(() => {
+    const s = window.__city.stage;
+    s.renderer.setSize(844, 390, false);   // 人为把缓冲拨回横屏尺寸（模拟转屏动画中途读到的旧尺寸）
+    const root = document.documentElement;
+    root.style.setProperty('--app-h', '843px');
+    setTimeout(() => root.style.setProperty('--app-h', '844px'), 50);
+  });
+  await sleep(600);
+  g = await geom();
+  expectGeom(g, 390, 844, 78, '脏缓冲被 ResizeObserver 纠回后');
+  // 切回横屏
+  await page.setViewport({ width: 844, height: 390, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  await sleep(900);
+  g = await geom();
+  expectGeom(g, 844, 390, 58, '转回横屏后');
+  check(bad(errors).length === 0, `旋转流程无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
+  await page.close();
 }
 await ctx.close();
 console.log(log.join('\n'));
