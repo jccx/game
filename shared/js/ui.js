@@ -80,6 +80,19 @@ export function toast(msg, ms = 1800) {
 }
 
 /**
+ * 下线通知 15 秒窗口：同一个名字 15 秒内只报一次，过期后可再报（2026-11-22 用户定：
+ * 下线通知只在断开连接的 15 秒内显示，之后自动消失，不一直挂着“xxx离开了”）。
+ * seen 存名字 -> 上次报的时间（毫秒墙钟）；调用时顺手清掉过期的名字，免得越攒越多。
+ * 网络抖动时同一个人反复掉线/重连，只报第一次，不刷屏；击杀播报不受影响。
+ */
+export function leaveNoticeDue(seen, name, now = Date.now()) {
+  for (const [n, t] of seen) if (now - t >= 15000) seen.delete(n);
+  if (seen.has(name)) return false;
+  seen.set(name, now);
+  return true;
+}
+
+/**
  * 把页面高度钉在“实际可见区域”的高度上，写进 CSS 变量 --app-h。
  * 用布局视口高度（window.innerHeight），不要用 visualViewport.height：
  * 手机浏览器显示地址栏/工具栏时 visualViewport 会变矮（还可能带 offsetTop），

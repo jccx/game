@@ -41,10 +41,10 @@ export class Vehicle {
   /** 还能不能上车 */
   get usable() { return this.alive && !this.burning; }
 
-  /** 受到伤害。耐久归零后先起火，几秒后爆炸。主角当前坐着的车无敌：和主角无敌状态一样，任何伤害都不掉血 */
+  /** 受到伤害。耐久归零后先起火，几秒后爆炸。主角当前坐着的车只在无敌开着时无敌（和主角无敌同一个开关，见 Sim.godOn）：无敌关了，火箭弹、坦克炮、爆炸、撞车照常掉血、照常炸 */
   damage(n, byPlayer = false) {
     if (!this.alive || n <= 0) return;
-    if (this.driver === 'player') return;   // 主角的座驾炸不坏：火箭弹、坦克炮、爆炸、撞车都不掉血
+    if (this.driver === 'player' && this.sim.godOn()) return;   // 无敌开着：主角的座驾炸不坏；无敌关了照常掉血
     this.hp -= n;
     if (byPlayer) this.byPlayer = true;
     if (this.hp <= 0 && !this.burning) {

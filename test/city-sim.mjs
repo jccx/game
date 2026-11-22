@@ -940,7 +940,7 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     chk(!t.destroyed && r && Math.abs(r.top - (t.y0 + t.h)) < 0.01, '重建后屋顶又能降落了（roofAt 恢复，高度就是楼顶）');
   }
 }
-// ---- 18) 重建新规则：警车穿废墟、废墟上的车重建时炸掉、主角座驾无敌 ----
+// ---- 18) 重建新规则：警车穿废墟、废墟上的车重建时炸掉、主角座驾无敌（2026-11-22 起座驾无敌只跟无敌开关走，见 §20） ----
 {
   // 警车能穿过废墟：视线和路都不挡（有意为之，不是 bug）
   // (a) 视线和碰撞：楼完好时挡，炸平后不挡
@@ -1023,14 +1023,14 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     chk(!h.destroyed, '楼重建了');
     chk(car.alive && car.hp === hp0, '楼边 8 米外的车不受影响（没炸、没掉血）');
   }
-  // 主角坐着的车无敌：火箭弹、爆炸、撞车都不掉血；没人坐的对照组照常掉血
+  // 主角坐着的车无敌（无敌开着时）：火箭弹、爆炸、撞车都不掉血；没人坐的对照组照常掉血
   {
     const s = new Sim(), p = s.player;
     const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
     tp(s, car.x + 2.5, car.z);
     s.ctl.enter = true; run(s, 0.1);
     chk(p.inVeh === car, '先坐进轿车');
-    p.godT = Infinity;
+    p.godT = Infinity;   // 无敌开着，座驾才无敌（2026-11-22 起只跟无敌开关走，见 §20）
     const hp0 = car.hp;
     car.damage(500, true);   // 直接伤害：火箭弹、坦克炮、撞车走的都是 Vehicle.damage
     chk(car.hp === hp0 && car.alive && !car.burning, '坐着的车被打 500 也不掉血、不起火');
@@ -1049,7 +1049,7 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     chk(boom, '火箭弹飞到了车顶、炸开了');
     chk(car.hp === before && car.alive, '火箭弹在车顶炸开，坐着的车不掉血');
   }
-  // 重建时主角坐着的车被推到楼外：楼回来、车完好、玩家还在车里、还能开
+  // 重建时主角坐着的车被推到楼外（无敌开着时）：楼回来、车完好、玩家还在车里、还能开；无敌关了会炸，见 §20
   {
     const s = new Sim(), w = s.world, p = s.player;
     const h = w.buildings.find((b) => b.kind === 'house');
@@ -1060,6 +1060,7 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
     tp(s, car.x + 2.5, car.z);
     s.ctl.enter = true; run(s, 0.1);
     chk(p.inVeh === car, '先坐进停在废墟上的车');
+    p.godT = Infinity;   // 无敌开着，座驾才不炸、才推到楼外（2026-11-22 起只跟无敌开关走）
     const hp0 = car.hp;
     h.rebuildAt = s.time + 0.1;
     run(s, 2);
@@ -1163,6 +1164,189 @@ const finite = (sim) => [sim.player, ...sim.vehicles, ...sim.peds].every((o) => 
       if (visAt >= 0 && i > visAt + 60) break;
     }
     chk(ok, '路边等车开过：车进窗口 0.25 秒后按上车，能上 13 米/秒的交通车');
+  }
+}
+
+// ---- 20) 主角座驾无敌只跟无敌开关走（2026-11-22 用户纠正）：无敌关了，坐着的车照常掉血、照常炸；无敌开着才不掉血 ----
+// 规则：座驾保护用的就是玩家无敌同一个开关 Sim.godOn()（本地 godT 或联机全员无敌 netGod，任一开着都算开）。
+// 守住的三个口子：Vehicle.damage（直接伤害、撞车、撞楼）、sim.explode 里的载具循环（爆炸伤害 + 炸飞）、rebuildBuilding（重建时废墟上的车）。
+// 不守的口子：直升机/飞机失事自毁（hp=0 + explode()，飞行员操作失误，见 (i)）、沉船（sink，从来没守过）。
+{
+  // (a) 无敌关了：直接伤害掉血
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === car, '先坐进轿车（无敌默认关着）');
+    chk(!s.godOn(), '无敌默认是关的（godT=0，netGod=false）');
+    const hp0 = car.hp;   // 轿车 320
+    car.damage(50, true);
+    chk(car.hp === hp0 - 50 && car.alive && !car.burning, `无敌关了：直接打 50，车掉血到 ${car.hp}`);
+  }
+  // (b) 无敌关了：旁边爆炸掉血，玩家还坐在车里
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    const hp0 = car.hp;
+    s.explode(car.x + 3, car.y + 1, car.z, 8, 100, true);   // 车边 3 米炸一枚小火箭（玩家只吃 31 伤，死不了）
+    chk(car.hp < hp0 && car.alive, `无敌关了：旁边爆炸，车掉血到 ${car.hp.toFixed(1)}`);
+    chk(p.inVeh === car && !p.dead, '爆炸后玩家还坐在车里、没死');
+  }
+  // (c) 无敌关了：头顶火箭掉血
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    const hp0 = car.hp;
+    s.shoot({ x: car.x, y: car.y + 20, z: car.z, dx: 0, dy: -1, dz: 0, speed: 55, range: 100, radius: 7, dmg: 100, byPlayer: false, kind: 'rocket', owner: null });
+    let boom = false;
+    for (let i = 0; i < 3 * TICK; i++) { s.update(dt); if (s.events.some((e) => e.type === 'explosion')) boom = true; s.events.length = 0; if (!s.shots.length) break; }
+    chk(boom, '火箭弹飞到了车顶、炸开了');
+    chk(car.hp < hp0 && car.alive && p.inVeh === car, `无敌关了：火箭弹在车顶炸开，车掉血到 ${car.hp.toFixed(1)}、玩家还坐在车里`);
+  }
+  // (d) 无敌关了：撞车掉血（车车碰撞走 Vehicle.damage，同样按 godOn 守着）
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    for (const v of s.vehicles) if (v !== car) { v.x += 500; v.z += 500; v.vx = 0; v.vz = 0; v.speed = 0; }   // 清走别的车，只留这对
+    const other = s.addVehicle('sedan', car.x, car.z + 3, 0);   // 3 米 < 两车半径和 3.52，叠在一起
+    car.vz = 12; other.vz = 0;   // 主角的车以 12 米/秒撞上去，相对速度 -12，伤害 (12-3)*6=54
+    const hp0 = car.hp;
+    s.collideVehicles();
+    chk(car.hp === hp0 - 54, `无敌关了：12 米/秒撞车，车掉血 54 到 ${car.hp}`);
+    chk(other.hp === other.spec.hp - 54, '对方的车也掉了 54 血（撞车是双向的）');
+  }
+  // (e) 无敌关了：打爆了就起火、几秒后炸掉，玩家被炸下车
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    car.damage(99999, true);
+    chk(car.hp === 0 && car.burning, '无敌关了：打 99999，车起火');
+    run(s, 4);   // 烧 2.6 秒后爆炸
+    chk(!car.alive && car.wreck, '起火 4 秒后车炸掉了');
+    chk(!p.inVeh, '车炸了，玩家被炸下车');
+  }
+  // (f) 无敌开着：直接伤害、爆炸、撞车、火箭全都不掉血（单机 godT）
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    p.godT = Infinity;
+    chk(s.godOn(), 'godT=Infinity 时 godOn() 为真');
+    const hp0 = car.hp;
+    car.damage(500, true);
+    chk(car.hp === hp0, '无敌开着：直接打 500 也不掉血');
+    s.explode(car.x + 3, car.y + 1, car.z, 8, 320, true);
+    chk(car.hp === hp0, '无敌开着：旁边炸 320 也不掉血');
+    for (const v of s.vehicles) if (v !== car) { v.x += 500; v.z += 500; v.vx = 0; v.vz = 0; v.speed = 0; }
+    const other = s.addVehicle('sedan', car.x, car.z + 3, 0);
+    car.vz = 12; other.vz = 0;
+    s.collideVehicles();
+    chk(car.hp === hp0, '无敌开着：12 米/秒撞车也不掉血');
+    chk(other.hp === other.spec.hp - 54, '对照：对方的车照常掉了 54 血（只保主角的车，不保别人的车）');
+    car.damage(99999, true);
+    chk(car.hp === hp0 && !car.burning, '无敌开着：打 99999 也不起火');
+  }
+  // (g) 坐车分摊：无敌关了，人只吃 20%，车吃 1.6 倍——分摊代码一直都在，只是原来被无条件守门挡住了；无敌开着整段直接返回
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    const hp0 = car.hp, php0 = p.hp;
+    s.hurtPlayer(50);
+    chk(car.hp === hp0 - 80 && p.hp === php0 - 10, `无敌关了：hurtPlayer(50)，车吃 1.6 倍掉 80（${car.hp}），人吃 20% 掉 10（${p.hp}）`);
+    p.godT = Infinity;
+    const hp1 = car.hp, php1 = p.hp;
+    s.hurtPlayer(50);
+    chk(car.hp === hp1 && p.hp === php1, '无敌开着：hurtPlayer 直接返回，人车都不掉血');
+    p.godT = 0;
+  }
+  // (h) 联机全员无敌 netGod 同样管座驾：只开 netGod 也保，只关 netGod 不保（直接改 sim.netGod 模拟 Net.setGod，见 net.js:548）
+  {
+    const s = new Sim(), p = s.player;
+    const car = s.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    p.godT = 0; s.netGod = true;   // 单机无敌关着，只开全员无敌
+    chk(s.godOn(), '只开 netGod 时 godOn() 也为真');
+    const hp0 = car.hp;
+    car.damage(500, true);
+    chk(car.hp === hp0, '只开全员无敌：直接打 500 也不掉血');
+    s.explode(car.x + 3, car.y + 1, car.z, 8, 320, true);
+    chk(car.hp === hp0, '只开全员无敌：旁边爆炸也不掉血');
+    s.netGod = false;   // 全员无敌也关了
+    chk(!s.godOn(), '两个都关了，godOn() 为假');
+    car.damage(50, true);
+    chk(car.hp === hp0 - 50, '两个都关了：直接打 50，车掉血');
+    p.godT = Infinity; s.netGod = false;   // 只开单机无敌
+    const hp1 = car.hp;
+    car.damage(500, true);
+    chk(car.hp === hp1, '只开单机无敌：直接打 500 也不掉血');
+    p.godT = 0;
+  }
+  // (i) 重建：无敌关了，主角坐着的车和别的车一样直接炸掉，玩家被炸下车；楼照旧回来、满血
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    car.parked = true;
+    s.damageBuilding(h, 99999);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === car, '先坐进停在废墟上的车（无敌关着）');
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    chk(!h.destroyed && h.hp === h.maxHp, '楼重建了、耐久回满（车爆炸没波及刚回来的楼）');
+    chk(!car.alive && car.wreck, '无敌关了：主角坐着的车在重建时炸掉了');
+    chk(!p.inVeh, '车炸了，玩家被炸下车');
+  }
+  // (j) 重建：无敌开着，主角坐着的车不炸、被推到楼外（和 §18 的推车测试同一条规则，这里只验开关）
+  {
+    const s = new Sim(), w = s.world, p = s.player;
+    const h = w.buildings.find((b) => b.kind === 'house');
+    const cx = (h.x0 + h.x1) / 2, cz = (h.z0 + h.z1) / 2;
+    const car = s.addVehicle('sedan', cx, cz, 0);
+    car.parked = true;
+    s.damageBuilding(h, 99999);
+    tp(s, car.x + 2.5, car.z);
+    s.ctl.enter = true; run(s, 0.1);
+    p.godT = Infinity;
+    const hp0 = car.hp;
+    h.rebuildAt = s.time + 0.1;
+    run(s, 2);
+    const eps = 1e-6;
+    const outside = car.x <= h.x0 - car.radius + eps || car.x >= h.x1 + car.radius - eps || car.z <= h.z0 - car.radius + eps || car.z >= h.z1 + car.radius - eps;
+    chk(!h.destroyed && h.hp === h.maxHp, '楼重建了');
+    chk(car.alive && car.hp === hp0, '无敌开着：主角坐着的车在重建时没炸、没掉血');
+    chk(p.inVeh === car, '玩家还坐在车里');
+    chk(outside, '车被推到了楼外');
+    p.godT = 0;
+  }
+  // (k) 直升机失事自毁不受无敌保护：无敌开着，满杆砸楼顶照旧坠毁（自毁直接 hp=0 + explode()，不走 Vehicle.damage）
+  {
+    const s = new Sim(), p = s.player, w = s.world;
+    const tower = w.buildings.filter((b) => b.roof === 0 && (b.x1 - b.x0) >= 18 && (b.z1 - b.z0) >= 18 && b.y0 + b.h >= 30).sort((a, b) => (b.y0 + b.h) - (a.y0 + a.h))[0];
+    const cx = (tower.x0 + tower.x1) / 2, cz = (tower.z0 + tower.z1) / 2, top = tower.y0 + tower.h;
+    const heli = s.vehicles.find((v) => v.type === 'heli');
+    tp(s, heli.x + 2.5, heli.z); s.ctl.enter = true; run(s, 0.1);
+    chk(p.inVeh === heli, '先上直升机');
+    p.godT = Infinity;   // 无敌开着
+    heli.x = cx; heli.z = cz; heli.y = top + 30; heli.flying = true; heli.vy = 0; heli.pitch = 0; heli.roll = 0; heli.yaw = 0;
+    run(s, 6, () => { s.ctl.pitch = -1; s.ctl.gas = 0; });
+    chk(!heli.alive, '无敌开着，满杆砸楼顶照旧坠毁（失事自毁不走 damage()，神也救不了）');
+    chk(!p.dead && p.hp === 100, '坠毁后玩家没掉血（无敌挡住了炸下车和爆炸的伤害）');
+    p.godT = 0;
   }
 }
 

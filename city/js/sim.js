@@ -43,7 +43,7 @@ export class Sim {
     this.fixedSpawns = []; this.fixedI = 0;       // 固定停放的载具（飞机、船、坦克等）：毁了或被开走后会在原地补一辆
     this.net = null;   // 联机（Hud 加入后才设）：只用来同步建筑/载具状态，单机时一直是 null
     this.netHost = false;   // 联机 v2：是不是房主（房主才模拟路人/警察/警车，见 setHost）
-    this.netGod = false;    // 联机 v2：全员无敌开关（任何人拨动都影响所有在线玩家，见 Net.setGod）；开的时候 hurtPlayer 直接返回
+    this.netGod = false;    // 联机 v2：全员无敌开关（任何人拨动都影响所有在线玩家，见 Net.setGod）；开的时候 hurtPlayer 直接返回，主角座驾也按 godOn 跟着无敌
     this.netPedSeq = 0;     // 房主给行人编 netId 的计数器（快照里按 netId 认人）
     this.netCarSeq = 0;     // 房主给追捕警车编 netId 的计数器
     this.runBudget = PLAYER.runCap;   // 跑步预算（令牌桶）：桶容量 40 秒，跑动每秒扣 1 秒，步行每秒回 1 秒
@@ -184,11 +184,15 @@ export class Sim {
 
   /* ------------------------------------------------------------ 玩家 */
 
+  /** 无敌是否开着：本地无敌（godT，单机开关，无限时长）或联机全员无敌（netGod，任何人拨动都影响所有在线玩家）。
+   * 玩家本人和主角座驾共用这一条：开着时人车都不掉血，关了人车都照常受伤（2026-11-22 用户纠正：座驾无敌仅在无敌开启时有效）。 */
+  godOn() { return this.player.godT > 0 || this.netGod; }
+
   hurtPlayer(dmg) {
     const p = this.player;
-    // 伤害唯一入口：PvP、警察、爆炸、撞车、摔落全走这里。本地无敌（godT）和联机全员无敌（netGod）都在这里挡；
-    // 坐车的分摊在下面，车本身的血不归这里管（全员无敌只保人、不保车，和单机无敌一致）。
-    if (p.dead || p.godT > 0 || this.netGod) return;
+    // 伤害唯一入口：PvP、警察、爆炸、撞车、摔落全走这里。无敌（godT / netGod，见 godOn）在这里挡；
+    // 坐车的分摊在下面：人只吃 20%，车吃 1.6 倍——无敌关了分摊照旧生效（车能被打掉血了），无敌开着整段直接返回、人车都不掉血。
+    if (p.dead || this.godOn()) return;
     if (p.inVeh) { p.inVeh.damage(dmg * 1.6, false); dmg *= 0.2; }
     if (p.armor > 0) { const a = Math.min(p.armor, dmg * 0.7); p.armor -= a; dmg -= a; }
     p.hp -= dmg; p.hitT = 0.3;
@@ -581,7 +585,7 @@ export class Sim {
     for (const o of this.peds) { if (!o.alive) continue; const d = Math.hypot(o.x - x, o.z - z); if (d < r) this.hurtPed(o, dmg * (1 - d / r) * 1.2, byPlayer, x, z); }
     for (const v of this.vehicles) {
       if (v === src || !v.alive) continue;
-      if (v.driver === 'player') continue;   // 主角的座驾无敌：爆炸既不掉血，也不把它炸飞（伤害本身也过 Vehicle.damage，那里同样守着）
+      if (v.driver === 'player' && this.godOn()) continue;   // 无敌开着：主角的座驾不掉血、也不被炸飞；无敌关了照常掉血、照常被炸飞（伤害走 damageVehicle → Vehicle.damage，那里同样按 godOn 守着）
       const d = Math.hypot(v.x - x, v.z - z);
       if (d < r + v.radius) {
         this.damageVehicle(v, dmg * (1 - d / (r + v.radius)) * (v.spec.cls === 'tank' ? 0.35 : 1), byPlayer);
@@ -627,7 +631,7 @@ export class Sim {
   }
 
   /** 有没有步行的玩家正好在某栋楼的占地里（重建会压到人就不能重建）。载具不再挡重建：废墟上的车到时间直接炸掉，
-   * 主角坐着的车推到楼外（见 rebuildBuilding）；坐车里的玩家不单独算，位置就是车的位置。
+   * 主角坐着的车：无敌开着才推到楼外，无敌关了直接炸掉（见 rebuildBuilding）；坐车里的玩家不单独算，位置就是车的位置。
    * 行人不挡：重建时把他们推出去。飞在楼顶上方的不算：高度超过楼顶 0.5 米就不挡，和 world.collide 的“从楼顶上方飞过”同一条线 */
   footprintOccupied(b) {
     const top = b.y0 + b.h + 0.5, p = this.player;
@@ -638,8 +642,8 @@ export class Sim {
   /** 一栋楼重建：状态回满、废墟消失、画面和小地图靠 buildingUp 事件恢复（见 view.js / hud.js）。
    * 占地里的车：重建那一刻直接炸掉，走现有的 Vehicle.explode 摧毁路径（残骸 + 爆炸火光/烟尘/音效，和被炸毁时一样），
    * 必须在楼恢复之前炸——爆炸本身会伤楼，楼这时还是废墟，damageBuilding 对已炸平的楼直接返回，刚重建好的楼不会被波及；
-   * 空车都炸（警车、交通车也一样，追捕系统会重新派车）。主角坐着的车不炸：楼恢复后再用 world.collide 把它（连同车里的主角）
-   * 推到最近的边缘外，复用行人推出那套机制；玩家位置下一帧跟着车同步（见 update）。
+   * 空车都炸（警车、交通车也一样，追捕系统会重新派车）。主角坐着的车：无敌开着才不炸，楼恢复后再用 world.collide 把它（连同车里的主角）
+   * 推到最近的边缘外，复用行人推出那套机制；无敌关了和别的车一样直接炸掉，玩家被炸下车（Vehicle.explode → exitVehicle）。玩家位置下一帧跟着车同步（见 update）。
    * 行人如果还在占地里，用 world.collide 把他们推到最近的边缘外：平时走路的行人每步都会被 collide 推出建筑，
    * 但发呆的行人不走路，不在这里推就永远卡在楼里。 */
   rebuildBuilding(b) {
@@ -649,7 +653,7 @@ export class Sim {
       if (!v.alive || v.sunk || v.y >= top) continue;   // 飞在楼顶上方的不算，和 footprintOccupied 同一条线
       const cx = clamp(v.x, b.x0, b.x1), cz = clamp(v.z, b.z0, b.z1);
       if (Math.hypot(v.x - cx, v.z - cz) >= v.radius) continue;   // 只有占地范围真正重叠的车才受影响
-      if (v === this.player.inVeh) { mine = v; continue; }
+      if (v === this.player.inVeh && this.godOn()) { mine = v; continue; }   // 无敌开着：主角坐着的车不炸，楼回来后推到楼外；无敌关了：和别的车一样直接炸掉
       v.explode();
     }
     b.destroyed = false; b.hp = b.maxHp; b.rebuildAt = 0;
@@ -669,7 +673,7 @@ export class Sim {
   }
 
   /** 每帧扫一遍等重建的队：到时间就重建；占地里有步行的玩家就延后 5 秒再看，直到人离开。
-   * 车不再挡重建：废墟上的车到时间直接炸掉，主角坐着的车推到楼外（见 rebuildBuilding）。
+   * 车不再挡重建：废墟上的车到时间直接炸掉，主角坐着的车只在无敌开着时推到楼外、关了也炸（见 rebuildBuilding）。
    * 计时用游戏时间 this.time：暂停（loop.timeScale = 0）时 sim.update 不跑，计时自动冻结。 */
   updateRebuilds() {
     const q = this.rebuildQueue;

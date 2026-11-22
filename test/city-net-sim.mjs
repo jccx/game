@@ -4,7 +4,7 @@
 import { Sim } from '../city/js/sim.js';
 import { TICK } from '../city/js/config.js';
 import { Net, validName, playerPayload, vehicleKey, weekKey } from '../city/js/net.js';
-import { keyboardViewport } from '../shared/js/ui.js';
+import { keyboardViewport, leaveNoticeDue } from '../shared/js/ui.js';
 
 /** 开火/伤害事件的序号键（和 net-firebase.js 里的一样）：补零到 8 位，字典序就是数字序 */
 const seqKey = (seq) => String(seq).padStart(8, '0');
@@ -536,6 +536,56 @@ let houseIdx = -1;
   ctl.mx = 0; ctl.mz = -1; ctl.run = true; run(sim, 0.5);
   chk(sim.player.running && Math.abs(sim.player.speed - 19.5) < 0.6, '回满 5 秒后解锁，又能跑了');
   ctl.run = false;
+}
+
+// ---- 16) 下线行为（2026-11-22 09:24 用户定）：下线后地图上不留人（只留排行榜）；下线通知 15 秒窗口 ----
+{
+  const server3 = new FakeServer();
+  const simC = new Sim(), simD = new Sim();
+  const evC = [];
+  const netC = new Net(simC, mockTransport(server3), { onEvent: (e) => evC.push(e) });
+  const netD = new Net(simD, mockTransport(server3), { onEvent: () => {} });
+  simC.net = netC; simD.net = netD;
+  const rC = await netC.join('戊');
+  const rD = await netD.join('己');
+  chk(rC.ok && rD.ok, '戊和己都加入（下线行为测试用新服务器）');
+  chk(netC.remotePlayers.has(netD.uid) && netD.remotePlayers.has(netC.uid), '两边互相看得到');
+  // (b) 先记一分：己被戊击杀，榜上有分
+  netD.recordKill('戊', '己');
+  const week3 = weekKey();
+  chk((server3.scores[week3]['戊'] || {}).kills === 1 && (server3.scores[week3]['己'] || {}).deaths === 1, '记分：戊 1 杀、己 1 死');
+  // (a) 己显式离开：戊这边在线列表里没他了，地图要画的东西（雷达/大地图/人物都读这张表）就是空的
+  const leaves0 = evC.filter((e) => e.type === 'playerLeave').length;
+  await netD.leave();
+  chk(!netC.remotePlayers.has(netD.uid) && netC.remotePlayers.size === 0, '己离开后，戊的在线列表里没他了（雷达/大地图/人物都读这张表）');
+  chk(evC.filter((e) => e.type === 'playerLeave' && e.name === '己').length - leaves0 === 1, '己离开，戊恰好收到一次 playerLeave（不多报）');
+  run(simC, 30);
+  for (let i = 0; i < 5; i++) netC.update(0.1);   // 兜底扫一遍：10 秒没更新的才当掉线，己已经清掉了，不会再报
+  chk(netC.remotePlayers.size === 0, '30 秒后戊的在线列表还是空的（没有幽灵复活）');
+  chk(evC.filter((e) => e.type === 'playerLeave' && e.name === '己').length - leaves0 === 1, '30 秒里 playerLeave 没有重复触发（通知不会反复弹）');
+  // (b) 排行榜活着：库里的分没动，戊这边榜上还有己
+  chk((server3.scores[week3]['戊'] || {}).kills === 1 && (server3.scores[week3]['己'] || {}).deaths === 1, '己下线后库里的分还在（离开不碰 scores 节点）');
+  chk(netC.scores.get('己') && netC.scores.get('己').deaths === 1, '己下线后戊的榜上还有己的 1 死（只留排行榜）');
+  // (c) 下线通知 15 秒窗口（假时钟：直接传 now）：同一人 15 秒内只报一次，满 15 秒可再报
+  const seen = new Map();
+  chk(leaveNoticeDue(seen, '己', 100000) === true, '第一次掉线报通知');
+  chk(leaveNoticeDue(seen, '己', 105000) === false, '5 秒内同一人再掉线不重复报');
+  chk(leaveNoticeDue(seen, '己', 114999) === false, '14.999 秒内还不报');
+  chk(leaveNoticeDue(seen, '己', 115000) === true, '满 15 秒后可再报（通知已过期）');
+  chk(leaveNoticeDue(seen, '戊', 115000) === true, '不同名字不受 15 秒窗口影响');
+  chk(seen.size === 2, '过期的名字已清掉，表里只剩两条有效记录');
+  // (d) 己用同一个名字重新加入：新鲜 presence，没有旧位置的幽灵
+  const simD2 = new Sim();
+  const netD2 = new Net(simD2, mockTransport(server3), { onEvent: () => {} });
+  simD2.net = netD2;
+  const rD2 = await netD2.join('己');
+  chk(rD2.ok, '己用同一个名字重新加入');
+  chk(netC.remotePlayers.size === 1, '戊这边只看到一个己（没有重复的幽灵）');
+  const rpD = netC.remotePlayers.get(netD2.uid);
+  chk(!!rpD && rpD.px === rpD.x && rpD.pz === rpD.z, '重新加入是新鲜位置（插值起点就是当前位置，没有旧位置残留）');
+  chk(netC.scores.get('己') && netC.scores.get('己').deaths === 1, '己回来后榜上的 1 死还在（重用名字继承分，不清零）');
+  await netD2.leave();
+  await netC.leave();
 }
 
 console.log(fail ? `有 ${fail} 项失败` : '落日湾联机逻辑测试全部通过');

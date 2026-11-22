@@ -1,5 +1,6 @@
 // 落日湾联机的浏览器测试：两个无头标签页同时加入、重名被拒、甲炸楼乙看到、重建后楼恢复、
-// 点“联机 N 人”打开排行榜、全员无敌共享开关。
+// 点“联机 N 人”打开排行榜、全员无敌共享开关、
+// 下线后地图上不留人（§9）、下线通知 15 秒窗口（§10）。
 // 注意：测的是真数据库、真共享地图（和正式玩家同一张地图）：炸的是一栋普通民居，重建（60~180 秒）会把它恢复；
 // 名字用 testA-/testB- 加随机后缀，测完断开就释放，页面关闭时 onDisconnect 也会清理。
 // 注意：Firebase 的 web API key 已被限制为只允许 https://jccx.github.io/* 来源（2026-11-22），
@@ -169,6 +170,60 @@ try {
   const hurt = await pageB.evaluate(() => { const s = window.__city.sim; s.player.hp = 100; s.hurtPlayer(50); return s.player.hp; });
   check(hurt < 100, `关掉后伤害又生效了（hp=${hurt}）`, log);
   await pageA.evaluate(() => window.__city.hud.closeOverlay());
+
+  // ---- 9) 下线后地图上不留人：乙离开，甲的大地图/画面里他就没了；排行榜不受影响 ----
+  // 大地图上的绿点只有 #4ade80 这一种绿色（任务是黄色、地标是金色），扫整张画布数绿像素就能断定有没有人。
+  const countGreen = (page) => page.evaluate(() => {
+    const cv = document.querySelector('.bigmap');
+    if (!cv) return -1;
+    const x = cv.getContext('2d');
+    const d = x.getImageData(0, 0, cv.width, cv.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (Math.abs(d[i] - 74) < 25 && Math.abs(d[i + 1] - 222) < 25 && Math.abs(d[i + 2] - 128) < 25) n++;
+    }
+    return n;
+  });
+  await pageA.bringToFront();
+  await pageA.evaluate(() => window.__city.hud.openMap());
+  await sleep(700);
+  const greenBefore = await countGreen(pageA);
+  check(greenBefore > 20, `大地图上能看到乙的绿点（对照，绿像素 ${greenBefore} 个）`, log);
+  await pageB.evaluate(async () => window.__city.hud.leaveNet());
+  await pageA.waitForFunction((n) => { const net = window.__city.net; return net && ![...net.remotePlayers.values()].some((r) => r.name === n); }, { timeout: 30000, polling: 500 }, nameB);
+  check(true, '乙离开后甲的在线列表里没他了', log);
+  await pageA.waitForFunction((n) => { const t = document.querySelector('.g-toast'); return t && t.classList.contains('show') && t.textContent.includes(n) && t.textContent.includes('离开了'); }, { timeout: 10000, polling: 500 }, nameB);
+  check(true, '乙离开后甲看到“离开了”通知', log);
+  await sleep(900);   // 大地图 0.5 秒一刷，等它刷掉下线的人
+  const greenAfter = await countGreen(pageA);
+  check(greenAfter === 0, `乙下线后，大地图上他的绿点没了（绿像素 ${greenAfter} 个，没有留在旧位置）`, log);
+  const rvSize = await pageA.evaluate(() => window.__city.view.remoteViews.size);
+  check(rvSize === 0, '乙下线后，甲画面里乙的人物也没了', log);
+  // 排行榜不受影响：榜的订阅还在，面板还能打开（本轮浏览器测试里没发生击杀，榜是空的；记分本身留不留由逻辑测试 §16b 断言）
+  const scoresAlive = await pageA.evaluate(() => { const n = window.__city.net; return !!n && n.scores instanceof Map && typeof n.scoresWeek === 'string' && n.scoresWeek.length === 10; });
+  check(scoresAlive, '乙下线后排行榜订阅还在（下线只清在线列表，不碰榜）', log);
+  await pageA.evaluate(() => window.__city.hud.openNet());
+  await pageA.waitForFunction(() => { const b = document.querySelector('.net-board'); return b && b.textContent.includes('本周排行榜'); }, { timeout: 15000, polling: 500 });
+  check(true, '乙下线后排行榜面板还能打开', log);
+  await pageA.evaluate(() => window.__city.hud.closeOverlay());
+
+  // ---- 10) 下线通知 15 秒窗口：出现后自动消失；15 秒内重复掉线不重复报 ----
+  // (i) §9 里乙离开的通知应该已经自己消失了（15 秒 toast，到期自动收起）
+  await pageA.waitForFunction(() => { const t = document.querySelector('.g-toast'); return t && !t.classList.contains('show'); }, { timeout: 20000, polling: 500 });
+  check(true, '下线通知 15 秒后自动消失（不再显示“离开了”）', log);
+  // (ii) 乙回来再走：离开又报一次
+  await pageB.evaluate((n) => window.__city.hud.joinNet(n), nameB);
+  await pageA.waitForFunction((n) => { const net = window.__city.net; return net && [...net.remotePlayers.values()].some((r) => r.name === n); }, { timeout: 30000, polling: 500 }, nameB);
+  await pageB.evaluate(async () => window.__city.hud.leaveNet());
+  await pageA.waitForFunction((n) => { const t = document.querySelector('.g-toast'); return t && t.classList.contains('show') && t.textContent.includes(n) && t.textContent.includes('离开了'); }, { timeout: 10000, polling: 500 }, nameB);
+  check(true, '乙回来又离开，甲又看到一次“离开了”', log);
+  // 15 秒内再来一次：回来、离开——重复掉线不重复报
+  await pageB.evaluate((n) => window.__city.hud.joinNet(n), nameB);
+  await pageA.waitForFunction((n) => { const net = window.__city.net; return net && [...net.remotePlayers.values()].some((r) => r.name === n); }, { timeout: 30000, polling: 500 }, nameB);
+  await pageB.evaluate(async () => window.__city.hud.leaveNet());
+  await sleep(2000);
+  const toastTxt = await pageA.evaluate(() => { const t = document.querySelector('.g-toast'); return t ? t.textContent : ''; });
+  check(!toastTxt.includes('离开了'), '15 秒内重复掉线不重复报“离开了”（去重）', log);
 
   // ---- 6) 断开 ----
   await pageA.evaluate(async () => window.__city.hud.leaveNet());

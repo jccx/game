@@ -2,7 +2,7 @@
 // 手机：左下摇杆（步行时移动；开车时左右转向，上下也可以当油门/刹车；开飞机时上下是俯仰）；
 //      在屏幕右半边空白处拖动可以转镜头；右下是动作键（步行：攻击、上车、换武器；开车：油门、刹车、手刹、下车、开炮）。
 // 电脑：WASD 移动/驾驶，按住鼠标拖动转镜头，空格 攻击/手刹，F 上下车，Q 换武器，J 攻击/车上发火箭筒（坦克炮是空格或“开炮”键），↑↓ 飞机俯仰/直升机升降，M 地图，Esc 设置。
-import { el, toast, toggleFullscreen, store, makeMemo, makeCheatButton, attachKeyboardFit } from '../../shared/js/ui.js';
+import { el, toast, leaveNoticeDue, toggleFullscreen, store, makeMemo, makeCheatButton, attachKeyboardFit } from '../../shared/js/ui.js';
 import { Joystick, ActionButton, DragPad } from '../../shared/js/input.js';
 import { Sfx } from '../../shared/js/audio.js';
 import { qualityRow, soundRow } from '../../shared/js/settings.js';
@@ -40,6 +40,7 @@ export class Hud {
     this.root = root; this.sim = sim; this.view = view; this.api = api; this.keys = api.keys;
     this.c = {}; this.slowT = 0; this.mapT = 0; this.bannerT = 0; this.engine = null; this.saveT = 5;
     this.net = null;   // 联机：没加入时是 null，单机完全不受影响
+    this._leaveSeen = new Map();   // 下线通知 15 秒窗口：名字 -> 上次报的时间（见 leaveNoticeDue）
     this.mapImg = paintMap(sim.world, 512);
     root.innerHTML = '';
     this.build();
@@ -322,7 +323,7 @@ export class Hud {
   }
 
   /* ---------------------------------------------------------- 弹出面板 */
-  closeOverlay() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this._netKbdDetach) { this._netKbdDetach(); this._netKbdDetach = null; } if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
+  closeOverlay() { if (this._netRefresh) { clearInterval(this._netRefresh); this._netRefresh = null; } if (this._mapRefresh) { clearInterval(this._mapRefresh); this._mapRefresh = null; this._mapCv = null; } if (this._netKbdDetach) { this._netKbdDetach(); this._netKbdDetach = null; } if (this.overlay) { this.overlay.remove(); this.overlay = null; this.api.pause(false); } }
   openOverlay(cls) {
     this.closeOverlay();
     this.overlay = el('div', { cls: 'g-overlay ' + cls }, this.root);
@@ -333,22 +334,15 @@ export class Hud {
 
   /** 大地图：全岛、任务点、特殊地点、自己的位置 */
   openMap() {
-    const sim = this.sim, p = sim.player, box = this.openOverlay('cmap');
+    const sim = this.sim, box = this.openOverlay('cmap');
     el('div', { cls: 'cbox-head', html: '<b>落日湾地图</b><span>黄色方块是任务，点地图外面关闭</span>' }, box);
     const body = el('div', { cls: 'cmap-body' }, box);
     const cv = el('canvas', { cls: 'bigmap' }, body); cv.width = cv.height = 640;
-    const x = cv.getContext('2d'), k = 640 / SIZE;
-    x.drawImage(this.mapImg, 0, 0, 640, 640);
-    const tag = (wx, wz, text, color) => { x.font = 'bold 15px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; const w = x.measureText(text).width + 10; x.fillStyle = color; x.fillRect(wx * k - w / 2, wz * k - 10, w, 20); x.fillStyle = '#111'; x.fillText(text, wx * k, wz * k + 1); };
-    const P = sim.world.places;
-    tag(RUNWAY.x - 70, (RUNWAY.z0 + RUNWAY.z1) / 2, '机场', '#cfd6e0'); tag((BASE[0] + BASE[2]) / 2, (BASE[1] + BASE[3]) / 2, '军营', '#b9c49a');
-    tag(P.pier.x0 + 5, P.pier.z1 + 26, '码头', '#d9b98a'); tag(P.hospital.x, P.hospital.z - 22, '医院', '#ffb0b0'); tag(430, 430, '山', '#e8e8e8');
-    for (const m of sim.missions.list) tag(m.at[0], m.at[1], m.icon + (sim.missions.done.has(m.id) ? '✓' : ''), sim.missions.done.has(m.id) ? '#b0a060' : '#ffd84a');
-    for (const b of sim.world.buildings) if (b.kind === 'landmark') tag((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, b.destroyed ? b.name + '（已炸平）' : b.name, b.destroyed ? '#8a8578' : '#d8a020');
-    // 联机：别的玩家是绿点
-    if (sim.net) for (const rp of sim.net.remotePlayers.values()) { x.fillStyle = '#4ade80'; x.beginPath(); x.arc(rp.x * k, rp.z * k, 6, 0, 6.283); x.fill(); x.lineWidth = 2; x.strokeStyle = '#000'; x.stroke(); }
-    x.translate(p.x * k, p.z * k); x.rotate(-p.yaw + Math.PI);
-    x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, -12); x.lineTo(9, 10); x.lineTo(0, 5); x.lineTo(-9, 10); x.closePath(); x.fill(); x.stroke();
+    this.drawBigMap(cv);
+    // 大地图开着时每 0.5 秒重画一次：下线的人马上从图上消失（以前只画一次，人走了绿点还留在旧位置上）；
+    // 自己的箭头和任务/地标状态也跟着实时走。关面板时 closeOverlay 里清掉这个定时器。
+    this._mapCv = cv;
+    this._mapRefresh = setInterval(() => { if (this._mapCv) this.drawBigMap(this._mapCv); }, 500);
     const list = el('div', { cls: 'mlist g-scroll' }, body);
     for (const m of sim.missions.list) {
       // 联机：别人正在做的任务标出来（谁在做、做到哪了）；做完了的标“已完成”
@@ -361,11 +355,42 @@ export class Hud {
     el('button', { cls: 'g-b', text: '关闭', on: { click: () => this.closeOverlay() } }, box);
   }
 
+  /** 画大地图的画布部分（底图、地名、任务、地标、联机绿点、自己的箭头）。开地图时画一次，开着时每 0.5 秒重画： *
+   * 下线的人已经不在 remotePlayers 里，重画后他的绿点就没了，不会留在旧位置上。每次重画先复位变换、清画布
+   *（画布的变换状态是接着上一次留下的，不复位的话第二次画会整体错位）。
+   */
+  drawBigMap(cv) {
+    const sim = this.sim, p = sim.player;
+    const x = cv.getContext('2d'), k = 640 / SIZE;
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.clearRect(0, 0, 640, 640);
+    x.drawImage(this.mapImg, 0, 0, 640, 640);
+    const tag = (wx, wz, text, color) => { x.font = 'bold 15px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; const w = x.measureText(text).width + 10; x.fillStyle = color; x.fillRect(wx * k - w / 2, wz * k - 10, w, 20); x.fillStyle = '#111'; x.fillText(text, wx * k, wz * k + 1); };
+    const P = sim.world.places;
+    tag(RUNWAY.x - 70, (RUNWAY.z0 + RUNWAY.z1) / 2, '机场', '#cfd6e0'); tag((BASE[0] + BASE[2]) / 2, (BASE[1] + BASE[3]) / 2, '军营', '#b9c49a');
+    tag(P.pier.x0 + 5, P.pier.z1 + 26, '码头', '#d9b98a'); tag(P.hospital.x, P.hospital.z - 22, '医院', '#ffb0b0'); tag(430, 430, '山', '#e8e8e8');
+    for (const m of sim.missions.list) tag(m.at[0], m.at[1], m.icon + (sim.missions.done.has(m.id) ? '✓' : ''), sim.missions.done.has(m.id) ? '#b0a060' : '#ffd84a');
+    for (const b of sim.world.buildings) if (b.kind === 'landmark') tag((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, b.destroyed ? b.name + '（已炸平）' : b.name, b.destroyed ? '#8a8578' : '#d8a020');
+    // 联机：别的玩家是绿点——只画现在还在线的（remotePlayers 里已经没了的人，这里就不会出现）
+    if (sim.net) for (const rp of sim.net.remotePlayers.values()) { x.fillStyle = '#4ade80'; x.beginPath(); x.arc(rp.x * k, rp.z * k, 6, 0, 6.283); x.fill(); x.lineWidth = 2; x.strokeStyle = '#000'; x.stroke(); }
+    x.translate(p.x * k, p.z * k); x.rotate(-p.yaw + Math.PI);
+    x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, -12); x.lineTo(9, 10); x.lineTo(0, 5); x.lineTo(-9, 10); x.closePath(); x.fill(); x.stroke();
+  }
+
   /* ---------------------------------------------------------- 联机 */
   netEvent(ev) {
     switch (ev.type) {
-      case 'playerJoin': toast(`${ev.name}加入了落日湾`); break;
-      case 'playerLeave': toast(`${ev.name}离开了`); break;
+      case 'playerJoin':
+        toast(`${ev.name}加入了落日湾`);
+        if (this._mapCv) this.drawBigMap(this._mapCv);   // 大地图开着时马上把新玩家画上去
+        break;
+      case 'playerLeave': {
+        // 下线通知只在断开连接的 15 秒内显示：同一个名字 15 秒内只报一次（网络抖动反复掉线/重连不会刷屏），
+        // 通知本身 15 秒后自动收起（toast 15 秒）；击杀播报（killFeed）是另一条 toast，不受影响。
+        if (leaveNoticeDue(this._leaveSeen, ev.name)) toast(`${ev.name}离开了`, 15000);
+        if (this._mapCv) this.drawBigMap(this._mapCv);   // 大地图开着时马上把下线的人擦掉，不留旧位置的绿点
+        break;
+      }
       case 'syncBlocked': toast(`联机同步被拒绝了（${ev.what}），请检查数据库规则`, 3000); break;
       case 'killFeed': toast(`${ev.killer} 击杀了 ${ev.victim}`); break;
       case 'godChange': toast(ev.on ? `${ev.by || '有人'}开启了全员无敌` : `${ev.by || '有人'}关闭了全员无敌`); break;
