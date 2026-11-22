@@ -154,7 +154,7 @@
           "driver": { ".validate": "newData.isString()" },
           "$other": { ".validate": false }
         },
-        "targets": { ".validate": "newData.val() === null || newData.isObject()" },
+        "targets": { ".validate": "!newData.isString() && !newData.isNumber() && !newData.isBoolean()" },
         "$other": { ".validate": false }
       }
     },
