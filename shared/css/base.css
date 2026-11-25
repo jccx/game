@@ -72,6 +72,7 @@ html.kbd .g-root { top: var(--vv-top, 0px); height: var(--vv-h, var(--app-h, 100
 }
 .g-btn.down { transform: scale(.92); filter: brightness(1.3); }
 .g-btn.off { filter: grayscale(1) brightness(.6); }
+.g-btn.on { outline: 2px solid #4ade80; outline-offset: 1px; filter: brightness(1.3); }   /* 锁定开关开着：绿圈高亮（跑步键） */
 .g-btn-icon { width: 62%; height: 62%; display: grid; place-items: center; pointer-events: none; font-size: calc(var(--u) * 6); line-height: 1; }
 .g-btn-icon svg { width: 100%; height: 100%; display: block; }
 .g-btn-cd { position: absolute; inset: 0; border-radius: 50%; display: none; pointer-events: none; }

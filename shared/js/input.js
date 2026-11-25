@@ -116,7 +116,7 @@ export class ActionButton {
     this.cdText = el('div', { cls: 'g-btn-cdtext' }, this.el);
     this.labelEl = el('div', { cls: 'g-btn-label', text: o.label || '' }, this.el);
     this.badgeEl = el('div', { cls: 'g-btn-badge' }, this.el);
-    this.pressed = false; this.enabled = true;
+    this.pressed = false; this.enabled = true; this._active = false;
     this._id = -1; this._sx = 0; this._sy = 0; this._cdShown = -1;
     this.ax = 0; this.ay = 0; this.mag = 0;
     this.aimRadius = o.aimRadius || 64;
@@ -169,6 +169,8 @@ export class ActionButton {
     }
   }
   setEnabled(b) { if (b !== this.enabled) { this.enabled = b; this.el.classList.toggle('off', !b); } }
+  /** 锁定开关的“开”态（跑步键）：开着时高亮，关了就恢复原样 */
+  setActive(b) { if (b !== this._active) { this._active = b; this.el.classList.toggle('on', b); } }
   setBadge(t) { if (this.badgeEl.textContent !== t) this.badgeEl.textContent = t; }
   setLabel(t) { if (this.labelEl.textContent !== t) this.labelEl.textContent = t; }
   setIcon(html) { this.iconEl.innerHTML = html; }

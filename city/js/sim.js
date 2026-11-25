@@ -36,7 +36,7 @@ export class Sim {
     };
     this.player.ammo[0] = Infinity;
     // 玩家的操作意图，由界面每帧填写；aimSet 表示本帧有没有镜头瞄准方向（有就用它，没有就用车头方向）
-    this.ctl = { mx: 0, mz: 0, steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, rocket: false, enter: false, swap: false, run: false, aimYaw: 0, aimSet: false };
+    this.ctl = { mx: 0, mz: 0, steer: 0, gas: 0, handbrake: false, pitch: 0, fire: false, rocket: false, enter: false, swap: false, aimYaw: 0, aimSet: false };
     // 通缉
     this.heat = 0; this.stars = 0; this.unseenT = 0; this.copSpawnT = 0; this.seen = false; this.seeT = 0; this.wantedLock = false;
     this.spawnT = 0; this.pedT = 0; this.nearBlocks = []; this.nearT = 0;
@@ -46,8 +46,9 @@ export class Sim {
     this.netGod = false;    // 联机 v2：全员无敌开关（任何人拨动都影响所有在线玩家，见 Net.setGod）；开的时候 hurtPlayer 直接返回，主角座驾也按 godOn 跟着无敌
     this.netPedSeq = 0;     // 房主给行人编 netId 的计数器（快照里按 netId 认人）
     this.netCarSeq = 0;     // 房主给追捕警车编 netId 的计数器
-    this.runBudget = PLAYER.runCap;   // 跑步预算（令牌桶）：桶容量 40 秒，跑动每秒扣 1 秒，步行每秒回 1 秒
+    this.runBudget = PLAYER.runCap;   // 跑步预算（令牌桶）：桶容量 30 秒，跑动每秒扣 1 秒，步行每秒回 1 秒
     this.runLocked = false;            // 桶扣空后锁死：强制步行，直到走路回满 runResume 秒才解锁（不然每走一帧回的桶马上又被扣空，跑/走每帧闪）
+    this.runToggle = false;            // 跑步锁定开关（2026-11-25 用户定）：点一下跑步键或按一下 Shift 就一直跑，再点一下才停，不用按住；扣空/上车/死亡/重生时自动关掉
     this.pendingTakes = new Map();           // 拾取物：已发给房主、等快照确认的领取请求（key -> 发出时间）
     this.recentTakes = [];                   // 拾取物：最近 5 秒被捡的一次性拾取物（给请求方在快照里确认用的）
     this.setupWorld();
@@ -198,7 +199,7 @@ export class Sim {
     p.hp -= dmg; p.hitT = 0.3;
     this.emit({ type: 'hurt', n: dmg });
     if (p.hp <= 0) {
-      p.hp = 0; p.dead = true; p.deadT = 0;
+      p.hp = 0; p.dead = true; p.deadT = 0; this.runToggle = false;   // 死了跑步开关自动关（重生后要自己再打开）
       if (p.inVeh) this.exitVehicle(true);
       this.emit({ type: 'wasted' });
       this.missions.fail('你倒下了');
@@ -207,7 +208,7 @@ export class Sim {
 
   respawn() {
     const p = this.player, h = this.world.places.hospital;
-    p.dead = false; p.hp = PLAYER.hp; p.armor = 0; p.x = p.px = h.x; p.z = p.pz = h.z; p.y = this.world.groundY(h.x, h.z); p.yaw = 0;
+    p.dead = false; p.hp = PLAYER.hp; p.armor = 0; p.x = p.px = h.x; p.z = p.pz = h.z; p.y = this.world.groundY(h.x, h.z); p.yaw = 0; this.runToggle = false;   // 重生后跑步开关是关的，要自己再打开
     // PvP 死（Net 收到致死伤害时立的旗）：不扣医药费、钱留着、通缉不变；其他死法照旧（医药费、清通缉）
     const pvp = !!p.pvpDeath; p.pvpDeath = false;
     const fee = pvp ? 0 : Math.min(300, Math.round(p.money * 0.1));
@@ -229,6 +230,7 @@ export class Sim {
 
   enterVehicle(v) {
     const p = this.player;
+    this.runToggle = false;   // 上车跑步开关自动关（下车后要自己再打开）
     if (v.remoteDriven) { this.toast('这辆警车正在追捕中，联机时不能抢'); return; }   // 兜底：nearestVehicle 已经跳过它了
     if (v.driver === 'npc') {                    // 抢车：把司机拉下来
       this.ejectNpc(v, true);
@@ -290,19 +292,19 @@ export class Sim {
       if (c.rocket) this.vehicleRocket();   // 车上只能发火箭筒（步行开火到不了这里，坦克炮走载具自己的 c.fire）
       return;
     }
-    // 步行：跑步是步行速度 ×3（PLAYER.runMul），按住 Shift / 跑步按钮；跑步预算是令牌桶：
-    // 桶容量 40 秒（游戏时间，暂停冻结），跑动每秒扣 1 秒，步行每秒回 1 秒（runRefill）；站着不动不扣也不回，扣空强制步行。
+    // 步行：跑步是步行速度 ×3（PLAYER.runMul），跑步开关是锁定的（点一下开、再点一下关，不用按住，见 toggleRun）；
+    // 跑步预算是令牌桶：桶容量 30 秒（游戏时间，暂停冻结），跑动每秒扣 1 秒，步行每秒回 1 秒（runRefill）；站着不动不扣也不回，扣空强制步行。
     // 扣空后锁死（runLocked）：继续走路回桶，回满 5 秒（runResume）才解锁再跑——不然每走一帧回的桶马上又被扣空，跑/走每帧闪。
-    // 60 秒里最多能跑约 50 秒（先跑满 40 秒、走 20 秒回 20 秒、再跑 10 秒）；40 秒上限是软指导、不是硬顶（2026-11-22 01:49 用户定令牌桶）。
+    // 60 秒里最多能跑约 45 秒（先跑满 30 秒、走 5 秒回 5 秒、跑 5 秒、走 5 秒、跑 5 秒、走 5 秒、跑 5 秒）；30 秒上限是软指导、不是硬顶（2026-11-22 01:49 用户定令牌桶，2026-11-25 桶从 40 秒改成 30 秒）。
     const m = Math.hypot(c.mx, c.mz), deep = w.inWater(p.x, p.z) && terrainY(p.x, p.z) < -1.2;
     p.swim = deep;
-    const wantRun = !!c.run && !deep;
+    const wantRun = this.runToggle && !deep;
     if (this.runLocked && this.runBudget >= PLAYER.runResume) this.runLocked = false;
     const running = m > 0.12 && wantRun && !this.runLocked && this.runBudget > 0.01;   // 0.01 秒以下当空（和 HUD 跑步键的启用阈值一致，避免浮点余量多跑一帧）
     const sp = deep ? PLAYER.swim : PLAYER.speed * (running ? PLAYER.runMul : 1);
     if (running) {
       this.runBudget = Math.max(0, this.runBudget - dt);
-      if (this.runBudget <= 0.01) this.runLocked = true;
+      if (this.runBudget <= 0.01) { this.runLocked = true; this.runToggle = false; }   // 扣空锁死，开关也自动关（解锁后要自己再打开，不会自动续跑）
     } else if (m > 0.12 && !deep) this.runBudget = Math.min(PLAYER.runCap, this.runBudget + dt * PLAYER.runRefill);
     p.running = running;
     if (m > 0.12) {
@@ -342,6 +344,16 @@ export class Sim {
   runBudgetLeft() { return this.runBudget; }
   /** 现在能不能跑（HUD 跑步键的启用状态）：没锁死、桶里还有。锁死期按钮一直灰着，直到回满 5 秒。 */
   runReady() { return !this.runLocked && this.runBudget > 0.01; }
+  /**
+   * 跑步锁定开关：点一下开、再点一下关（2026-11-25 用户定，不用按住）。
+   * 关随时能关；开只有没锁死、没死、没在车上时才行——锁死期按了也没用，开关保持关着。
+   * 返回开关现在的状态（true 开 / false 关）。HUD 的跑步键和 Shift 键都调这里。
+   */
+  toggleRun() {
+    if (this.runToggle) { this.runToggle = false; return false; }
+    if (this.runLocked || this.player.dead || this.player.inVeh) return false;
+    this.runToggle = true; return true;
+  }
 
   /** 拾取物的效果（只生效，不记账）：钱、回血、护甲、消星、武器弹药。满血捡医疗包、没星捡消星，返回 false（不消耗拾取物）。 */
   applyPickupEffect(type, val) {

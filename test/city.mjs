@@ -107,42 +107,60 @@ if (!quick) {
   check(bad(errors).length === 0, `载具巡礼无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
   await page.close();
 }
-// 跑步模式（令牌桶，2026-11-22 01:49 用户定）：3 倍速，桶 40 秒，跑动扣、步行回，扣空强制步行（只在完整模式下）
+// 跑步模式（锁定开关 + 令牌桶，2026-11-25 用户定）：点一下开、再点一下关，不用按住；桶 30 秒，跑动扣、步行回，扣空强制步行（只在完整模式下）
 if (!quick) {
   const { page, errors } = await open(ctx, '/city/?fresh=1&q=1', VIEW.landscape);
   await ready(page);
   await sleep(1200);
-  const runState = () => page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player; return { speed: p.speed, running: p.running, left: s.runBudgetLeft(), ready: s.runReady(), badge: m.hud.bRun.badgeEl.textContent, off: m.hud.bRun.el.classList.contains('off') }; });
-  const freeze = () => page.evaluate(() => { const c = window.__city.sim.ctl; c.mx = 0; c.mz = 0; c.run = false; });
-  // 传到市中心人行道，锁住真实输入，由脚本直接给方向和跑步键（和载具巡礼一样用快进）
+  const runState = () => page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player; return { speed: p.speed, running: p.running, toggle: s.runToggle, left: s.runBudgetLeft(), ready: s.runReady(), badge: m.hud.bRun.badgeEl.textContent, label: m.hud.bRun.labelEl.textContent, on: m.hud.bRun.el.classList.contains('on'), off: m.hud.bRun.el.classList.contains('off') }; });
+  const freeze = () => page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = 0; m.sim.runToggle = false; });
+  // 传到市中心人行道，锁住真实输入，由脚本直接拨开关和给方向（和载具巡礼一样用快进）
   await page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player; if (p.inVeh) s.exitVehicle(true); p.hp = 100; const n = s.world.node(7, 7); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; m.hud.locked = true; });
-  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; c.run = true; m.loop.fastForward(1); });
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; m.sim.toggleRun(); m.loop.fastForward(1); });
   let r = await runState();
-  check(r.running && r.speed > 18, `按住跑步跑起来了（${r.speed.toFixed(1)} 米/秒，约 3 倍步行）`, log);
-  check(Math.abs(r.left - 39) < 1, `跑 1 秒扣 1 秒预算（剩 ${r.left.toFixed(1)} 秒）`, log);
+  check(r.toggle && r.running && r.speed > 18, `点一下开关跑起来了（${r.speed.toFixed(1)} 米/秒，约 3 倍步行）`, log);
+  check(Math.abs(r.left - 29) < 1, `跑 1 秒扣 1 秒预算（剩 ${r.left.toFixed(1)} 秒）`, log);
   await freeze();
-  // 等角标真的刷到 39s 再读：HUD 是 0.1 秒一刷，无头下帧率低，固定睡 600 毫秒有时读早了
-  //（角标还是初始的 40s），和武器切换那处一样改成等条件而不是等固定时间。
-  await page.waitForFunction(`window.__city.hud.bRun.badgeEl.textContent === '39s'`, { timeout: 5000 }).catch(() => {});
+  // 等角标真的刷到 29s 再读：HUD 是 0.1 秒一刷，无头下帧率低，固定睡 600 毫秒有时读早了
+  //（角标还是初始的 30s），和武器切换那处一样改成等条件而不是等固定时间。
+  await page.waitForFunction(`window.__city.hud.bRun.badgeEl.textContent === '29s'`, { timeout: 5000 }).catch(() => {});
   r = await runState();
-  check(r.badge === '39s', `跑步键角标显示剩余 39s（实测“${r.badge}”）`, log);
-  // 跑满 40 秒扣空：每 0.5 秒传回原地（往北跑 30 秒会进河，水里不跑也不回桶），一锁死就停——不停的话锁死后每 chunk 还在走路回桶
-  await page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player, c = s.ctl; const n = s.world.node(7, 7); c.mx = 0; c.mz = -1; c.run = true; for (let i = 0; i < 90 && !s.runLocked; i++) { m.loop.fastForward(0.5); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; } });
+  check(r.badge === '29s', `跑步键角标显示剩余 29s（实测“${r.badge}”）`, log);
+  // 跑满 30 秒扣空：每 0.5 秒传回原地（往北跑 30 秒会进河，水里不跑也不回桶），一锁死就停——不停的话锁死后每 chunk 还在走路回桶
+  await page.evaluate(() => { const m = window.__city, s = m.sim, p = s.player, c = s.ctl; const n = s.world.node(7, 7); c.mx = 0; c.mz = -1; m.sim.toggleRun(); for (let i = 0; i < 90 && !s.runLocked; i++) { m.loop.fastForward(0.5); p.x = p.px = n.x + 9.5; p.z = p.pz = n.z + 9.5; } });
   r = await runState();
-  check(!r.running && r.speed < 7, '预算扣空后强制步行（还按着跑步键）', log);
+  check(!r.running && r.speed < 7, '预算扣空后强制步行（开关已自动关了）', log);
   check(r.left < 1, `扣空后桶里不到 1 秒（剩 ${r.left.toFixed(1)} 秒）`, log);
   await freeze();
   await sleep(600);
   r = await runState();
   check(r.off, '扣空后跑步键变灰（锁死期）', log);
   // 走 6 秒回 6 秒，解锁，又能跑了
-  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; c.run = false; m.loop.fastForward(6); });
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.mx = 0; c.mz = -1; m.loop.fastForward(6); });
   await sleep(600);   // 等 HUD 刷新跑步键（0.1 秒一刷，无头下帧率低，读早了按钮还是灰的）
   r = await runState();
   check(Math.abs(r.left - 6) < 1.5 && r.ready && !r.off, `走 6 秒回 6 秒预算，跑步键恢复（剩 ${r.left.toFixed(1)} 秒）`, log);
-  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; c.run = true; m.loop.fastForward(1); });
+  await page.evaluate(() => { const m = window.__city, c = m.sim.ctl; m.sim.toggleRun(); m.loop.fastForward(1); });
   r = await runState();
   check(r.running && r.speed > 18, '回满 5 秒解锁，又能跑了', log);
+  // 锁定开关：点一下跑步键关，再点一下开（文案和高亮跟着变）
+  await page.evaluate(() => { const b = window.__city.hud.bRun.el; b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, bubbles: true })); b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true })); });
+  await sleep(600);   // 等 HUD 刷新按钮（0.1 秒一刷）
+  r = await runState();
+  check(!r.toggle && r.label === '跑步' && !r.on, '点一下跑步键，开关关了（文案变回“跑步”、高亮没了）', log);
+  await page.evaluate(() => { const b = window.__city.hud.bRun.el; b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, bubbles: true })); b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true })); });
+  await sleep(600);
+  r = await runState();
+  check(r.toggle && r.label === '跑步中' && r.on, '再点一下跑步键，开关开了（文案“跑步中”、按钮高亮）', log);
+  // 锁定开关：按一下 Shift 关，再按一下开（键盘走真实按键事件，HUD 输入要先解锁；W 按住让角色一直往前走，不然站着看不出跑没跑）
+  await page.evaluate(() => { const m = window.__city; m.hud.locked = false; window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', repeat: false })); });
+  await page.evaluate(() => { const m = window.__city; window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft', repeat: false })); m.loop.fastForward(0.3); });
+  r = await runState();
+  check(!r.toggle && !r.running && r.speed > 5 && r.speed < 7, `按一下 Shift，跑步开关关了（变回步行 ${r.speed.toFixed(1)} 米/秒）`, log);
+  await page.evaluate(() => { const m = window.__city; window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft', repeat: false })); m.loop.fastForward(0.3); });
+  r = await runState();
+  check(r.toggle && r.running && r.speed > 18, '再按一下 Shift，跑步开关又开了', log);
+  await page.evaluate(() => { const m = window.__city; window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' })); m.hud.locked = true; });
   check(bad(errors).length === 0, `跑步流程无报错 ${bad(errors).slice(0, 3).join(' | ')}`, log);
   await page.close();
 }

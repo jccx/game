@@ -160,7 +160,9 @@ simA.net = netA; simB.net = netB;
   const rB = await netB.join('乙');
   chk(rA.ok && rB.ok, '甲和乙都加入联机');
   chk(netA.status === 'online' && netB.status === 'online', '两边状态都是 online');
-  chk(evB.some((e) => e.type === 'playerJoin' && e.name === '甲'), '乙收到了“甲加入”');
+  // 甲先在线、乙后加入：甲收到乙是真的“新加入”；乙第一张快照里的甲早就在线了，只记下来、不报“加入了”（不然一进联机就给每个老玩家各弹一条无故通知）
+  chk(evA.some((e) => e.type === 'playerJoin' && e.name === '乙'), '甲收到了“乙加入”（乙是真的新来的）');
+  chk(!evB.some((e) => e.type === 'playerJoin' && e.name === '甲'), '乙没收到“甲加入”（甲早就在线了，初次快照不报）');
   // 甲走 5 米，广播后乙能看到位置变了
   simA.player.x += 5;
   netA.update(0.2);
@@ -263,14 +265,23 @@ let houseIdx = -1;
   netA.update(0.2);
 }
 
-// ---- 6) 掉线兜底：远端玩家 10 秒没更新就当离开 ----
+// ---- 6) 掉线兜底：远端玩家 10 秒没发新包就当离开（看本地收到新包的时间 seenAt，不看包里对方的墙钟） ----
 {
   const rp = netB.remotePlayers.get(netA.uid);
   chk(!!rp, '乙还看得到甲');
+  // 注意：第 5 节甲真的离开过一次，evB 里已经有一条“甲离开”了，这里只数新增的
+  const leaves0 = evB.filter((e) => e.type === 'playerLeave' && e.name === '甲').length;
+  // 对方时钟比我慢 20 秒：包里的 updatedAt 是过去的，但本地刚收到新包（seenAt 是新的），不能当掉线（旧代码这里会误判，反复报离开/加入）
   rp.updatedAt = Date.now() - 20000;
   netB.update(0.1);
-  chk(!netB.remotePlayers.has(netA.uid), '甲 10 秒没更新，乙那边把他清掉了');
-  chk(evB.some((e) => e.type === 'playerLeave' && e.name === '甲'), '乙收到“甲离开”');
+  chk(netB.remotePlayers.has(netA.uid), '对方时钟慢 20 秒，乙也不会误判甲掉线（只看本地收到新包的时间）');
+  chk(evB.filter((e) => e.type === 'playerLeave' && e.name === '甲').length === leaves0, '时钟慢不产生新的“甲离开”');
+  // 对方时钟比我快 10 分钟：包里的 updatedAt 在未来，但本地 20 秒没收到他的新包了，照样当掉线（旧代码这里永远不触发，幽灵一直留在地图上）
+  rp.updatedAt = Date.now() + 600000;
+  rp.seenAt = Date.now() - 20000;
+  netB.update(0.1);
+  chk(!netB.remotePlayers.has(netA.uid), '对方时钟快 10 分钟、本地 20 秒没收到新包，乙还是把他清掉了');
+  chk(evB.filter((e) => e.type === 'playerLeave' && e.name === '甲').length === leaves0 + 1, '乙收到“甲离开”（恰好多一次）');
 }
 
 // ---- 7) 离开：玩家节点和名字都释放，乙看不到甲了 ----
@@ -488,54 +499,91 @@ let houseIdx = -1;
   chk(!simB.vehicles.some((v) => v.missionId === def.id), '任务结束，乙的任务车镜像也清了');
 }
 
-// ---- 15) 跑步模式（令牌桶，2026-11-22 01:49 用户定）：3 倍速；桶 40 秒，跑动扣、步行回，站着不扣不回；扣空强制步行 ----
+// ---- 15) 跑步模式（锁定开关 + 令牌桶，2026-11-25 用户定）：点一下开、再点一下关，不用按住；桶 30 秒，跑动扣、步行回，站着不扣不回；扣空强制步行并关开关；上车/死亡/重生关开关 ----
 {
   const sim = new Sim();
   const ctl = sim.ctl;
   const sx0 = sim.player.x, sz0 = sim.player.z;   // 出生点（住宅区人行道，陆地）
-  // 长时间跑/走：每 1 秒传回出生点——往北跑 30 秒会进河（水里不跑也不回桶），传回出生点只为留在陆地上，不影响预算逻辑
-  const go = (runFlag, sec) => { ctl.mx = 0; ctl.mz = -1; ctl.run = runFlag; let left = sec; while (left > 0) { const step = Math.min(1, left); run(sim, step); left -= step; tp(sim, sx0, sz0); } };
-  chk(Math.abs(sim.runBudgetLeft() - 40) < 1e-9, '出生时跑步预算是满的 40 秒');
+  // 走：只传方向，跑不跑只看开关（不用按住跑步键）
+  const go = (sec) => { ctl.mx = 0; ctl.mz = -1; let left = sec; while (left > 0) { const step = Math.min(1, left); run(sim, step); left -= step; tp(sim, sx0, sz0); } };
+  chk(Math.abs(sim.runBudgetLeft() - 30) < 1e-9, '出生时跑步预算是满的 30 秒');
+  chk(sim.runToggle === false, '出生时跑步开关是关的');
   // 步行速度
-  go(false, 0.5);
+  go(0.5);
   chk(Math.abs(sim.player.speed - 6.5) < 0.6 && !sim.player.running, `步行速度 6.5 米/秒（实测 ${sim.player.speed.toFixed(1)}）`);
-  // 跑步 3 倍速
-  go(true, 0.5);
+  // 点一下开关就跑起来，之后不用按住也一直跑
+  chk(sim.toggleRun() === true && sim.runToggle === true, '点一下开关就开了');
+  go(0.5);
   chk(sim.player.running && Math.abs(sim.player.speed - 19.5) < 0.6, `跑步速度 19.5 米/秒（实测 ${sim.player.speed.toFixed(1)}），正好 3 倍`);
-  chk(Math.abs(sim.runBudgetLeft() - 39.5) < 0.6, `跑 0.5 秒扣 0.5 秒预算（剩 ${sim.runBudgetLeft().toFixed(1)} 秒）`);
+  chk(Math.abs(sim.runBudgetLeft() - 29.5) < 0.6, `跑 0.5 秒扣 0.5 秒预算（剩 ${sim.runBudgetLeft().toFixed(1)} 秒）`);
   chk(playerPayload(sim, '甲').run === 1, '跑步时同步标志 run=1（别人看跑步姿态）');
-  // 扣空：再跑 39.5 秒，预算归零、锁死；再跑一小步，强制步行状态落定（刚扣空那一 tick 的 running 还是 true，下一 tick 才变步行）
-  go(true, 39.5);
-  chk(sim.runBudgetLeft() < 0.05, '跑满 40 秒后预算归零');
+  // 再点一下就停了，变回步行，预算开始回
+  chk(sim.toggleRun() === false && sim.runToggle === false, '再点一下开关就关了');
+  go(0.5);
+  chk(!sim.player.running && Math.abs(sim.player.speed - 6.5) < 0.6, '关了开关就变回步行');
+  chk(Math.abs(sim.runBudgetLeft() - 30) < 0.6, `关了开关走 0.5 秒，预算回满 30 秒（剩 ${sim.runBudgetLeft().toFixed(1)} 秒）`);
+  // 扣空：开开关跑 30 秒，预算归零、锁死、开关自动关；再跑一小步，强制步行状态落定（刚扣空那一 tick 的 running 还是 true，下一 tick 才变步行）
+  sim.toggleRun();
+  go(30);
+  chk(sim.runBudgetLeft() < 0.05, '跑满 30 秒后预算归零');
   chk(sim.runLocked === true, '扣空后锁死');
+  chk(sim.runToggle === false, '扣空后开关自动关了（解锁后不会自动续跑）');
   run(sim, 0.1);
-  chk(!sim.player.running && Math.abs(sim.player.speed - 6.5) < 0.6, '预算空了强制步行（还按着跑步键，速度回 6.5）');
+  chk(!sim.player.running && Math.abs(sim.player.speed - 6.5) < 0.6, '预算空了强制步行（开关还开着也不会跑，因为已经自动关了）');
   chk(playerPayload(sim, '甲').run === 0, '强制步行时同步标志 run=0');
+  // 锁死期点开关开不了
+  chk(sim.toggleRun() === false && sim.runToggle === false, '锁死期点开关也开不了');
   // 走路回额度：走 20 秒回 20 秒
-  go(false, 20);
+  go(20);
   chk(Math.abs(sim.runBudgetLeft() - 20) < 0.5, `走 20 秒回 20 秒预算（剩 ${sim.runBudgetLeft().toFixed(1)} 秒）`);
-  // 再跑 10 秒：60 秒里一共跑了 50 秒（40+10），令牌桶允许
-  go(true, 10);
-  chk(sim.player.running && Math.abs(sim.runBudgetLeft() - 10) < 0.5, '走 20 秒后又能跑 10 秒（60 秒里跑了 50 秒）');
-  // 站着不动：不扣也不回
-  ctl.mx = 0; ctl.mz = 0; ctl.run = true; run(sim, 5);
-  chk(Math.abs(sim.runBudgetLeft() - 10) < 0.5, '站着按住跑步键 5 秒，预算不动（不扣）');
-  ctl.run = false; run(sim, 5);
-  chk(Math.abs(sim.runBudgetLeft() - 10) < 0.5, '站着不动 5 秒，预算也不回（只走路才回）');
-  // 锁死期：再跑 10.1 秒扣空（前面落定那 0.1 秒回了 0.1 秒桶），锁死；走 3 秒只回 3 秒（不到 5 秒解锁线），按住跑还是步行；再走 2 秒回满 5 秒，解锁，又能跑了
-  go(true, 10.1);
+  // 再跑 10 秒：跑 30 秒、走 20 秒、跑 10 秒，60 秒里一共跑了 40 秒
+  sim.toggleRun();
+  go(10);
+  chk(sim.player.running && Math.abs(sim.runBudgetLeft() - 10) < 0.5, '走 20 秒后又能跑 10 秒（60 秒里跑了 40 秒）');
+  // 站着不动：开关开着也不扣，关了也不回
+  ctl.mx = 0; ctl.mz = 0; run(sim, 5);
+  chk(Math.abs(sim.runBudgetLeft() - 10) < 0.5, '站着、开关开着 5 秒，预算不动（不扣）');
+  sim.toggleRun();
+  run(sim, 5);
+  chk(Math.abs(sim.runBudgetLeft() - 10) < 0.5, '站着、开关关了 5 秒，预算也不回（只走路才回）');
+  // 锁死期：再跑 10.1 秒扣空（前面落定那 0.1 秒回了 0.1 秒桶），锁死；走 3 秒只回 3 秒（不到 5 秒解锁线），开关开不了、还是步行；再走 2 秒回满 5 秒，解锁，又能跑了
+  sim.toggleRun();
+  go(10.1);
   chk(sim.runBudgetLeft() < 0.05, '再跑 10 秒扣空');
   chk(sim.runLocked === true, '扣空后又锁死');
+  chk(sim.runToggle === false, '扣空后开关又自动关了');
   run(sim, 0.1);
   chk(!sim.player.running, '锁死后强制步行');
-  go(false, 3);
+  go(3);
   chk(Math.abs(sim.runBudgetLeft() - 3) < 0.5, `锁死后走 3 秒回 3 秒（剩 ${sim.runBudgetLeft().toFixed(1)} 秒），还没到 5 秒解锁线`);
-  ctl.mx = 0; ctl.mz = -1; ctl.run = true; run(sim, 0.5);
-  chk(!sim.player.running && Math.abs(sim.player.speed - 6.5) < 0.6, '没回满 5 秒前按住跑还是步行（锁死期）');
-  go(false, 2);
-  ctl.mx = 0; ctl.mz = -1; ctl.run = true; run(sim, 0.5);
+  chk(sim.toggleRun() === false, '没回满 5 秒前点开关开不了');
+  ctl.mx = 0; ctl.mz = -1; run(sim, 0.5);
+  chk(!sim.player.running && Math.abs(sim.player.speed - 6.5) < 0.6, '没回满 5 秒前还是步行（锁死期）');
+  go(2);
+  chk(sim.toggleRun() === true, '回满 5 秒后解锁，开关能打开了');
+  ctl.mx = 0; ctl.mz = -1; run(sim, 0.5);
   chk(sim.player.running && Math.abs(sim.player.speed - 19.5) < 0.6, '回满 5 秒后解锁，又能跑了');
-  ctl.run = false;
+  sim.toggleRun();
+  // 上车关开关：开着开关走到车旁上车，开关关了
+  sim.toggleRun();
+  const car = sim.vehicles.find((v) => v.type === 'sedan' && v.fixed);
+  tp(sim, car.x + 2.5, car.z);
+  ctl.enter = true; run(sim, 0.1);
+  chk(sim.player.inVeh === car, '开着开关也能正常上车');
+  chk(sim.runToggle === false, '一上车跑步开关就关了');
+  ctl.enter = true; run(sim, 0.2);
+  chk(!sim.player.inVeh, '下车后站在车旁（开关还是关的，不会自动续跑）');
+  chk(sim.runToggle === false, '下车后开关还是关的');
+  // 死亡关开关：开着开关被打死，开关关了；重生后还是关的
+  sim.toggleRun();
+  chk(sim.runToggle === true, '死前开关能打开');
+  sim.hurtPlayer(500);
+  chk(sim.player.dead === true, '被打死了');
+  chk(sim.runToggle === false, '一死跑步开关就关了');
+  chk(sim.toggleRun() === false, '死了点开关也开不了');
+  run(sim, 5);
+  chk(sim.player.dead === false, '5 秒后在医院重生了');
+  chk(sim.runToggle === false, '重生后开关还是关的');
 }
 
 // ---- 16) 下线行为（2026-11-22 09:24 用户定）：下线后地图上不留人（只留排行榜）；下线通知 15 秒窗口 ----
@@ -586,6 +634,52 @@ let houseIdx = -1;
   chk(netC.scores.get('己') && netC.scores.get('己').deaths === 1, '己回来后榜上的 1 死还在（重用名字继承分，不清零）');
   await netD2.leave();
   await netC.leave();
+}
+
+// ---- 17) 加入/离开通知（2026-11-25 用户定：没有玩家变动时不该弹通知）----
+// 根因有两个：（1）刚加入时第一张全量快照里的老玩家也被报“加入了”；（2）掉线兜底看的是包里对方的墙钟，
+// 对方时钟和我差几分钟是常事——慢了就误判掉线、快了就永远不触发兜底，地图上一直留着人，来回刷离开/加入。
+{
+  const server4 = new FakeServer();
+  const simG = new Sim(), simH = new Sim(), simI = new Sim();
+  const evG = [], evH = [], evI = [];
+  const netG = new Net(simG, mockTransport(server4), { onEvent: (e) => evG.push(e) });
+  const netH = new Net(simH, mockTransport(server4), { onEvent: (e) => evH.push(e) });
+  const netI = new Net(simI, mockTransport(server4), { onEvent: (e) => evI.push(e) });
+  simG.net = netG; simH.net = netH; simI.net = netI;
+  await netG.join('甲');
+  await netH.join('乙');
+  chk(evG.filter((e) => e.type === 'playerJoin' && e.name === '乙').length === 1, '甲收到 1 次“乙加入”（乙是真的新来的）');
+  chk(evH.filter((e) => e.type === 'playerJoin' && e.name === '甲').length === 0, '乙没收到“甲加入”（甲早就在线了，初次快照不报）');
+  await netI.join('丙');
+  chk(evG.filter((e) => e.type === 'playerJoin' && e.name === '丙').length === 1, '甲收到 1 次“丙加入”');
+  chk(evH.filter((e) => e.type === 'playerJoin' && e.name === '丙').length === 1, '乙收到 1 次“丙加入”');
+  chk(evI.filter((e) => e.type === 'playerJoin').length === 0, '丙加入时自己不报任何“加入”（初次快照里的甲乙早就在线）');
+  // 重放：整张快照再发一遍（模拟重连），谁也不报
+  const nG = evG.length, nH = evH.length, nI = evI.length;
+  server4.notify('players');
+  chk(evG.length === nG && evH.length === nH && evI.length === nI, '快照重放（重连）零通知');
+  // 时钟抖动不产生通知：丙的包上时钟慢 20 秒，但甲刚收到他的新包，不能当掉线
+  const rpI = netG.remotePlayers.get(netI.uid);
+  chk(!!rpI, '甲还看得到丙');
+  rpI.updatedAt = Date.now() - 20000;
+  netG.update(0.1);
+  chk(netG.remotePlayers.has(netI.uid), '丙时钟慢 20 秒，甲也不会把他清掉');
+  chk(evG.filter((e) => e.type === 'playerLeave' && e.name === '丙').length === 0, '时钟慢不产生“丙离开”');
+  // 真的加入/离开还是恰好报一次
+  const simJ = new Sim();
+  const netJ = new Net(simJ, mockTransport(server4), { onEvent: () => {} });
+  simJ.net = netJ;
+  await netJ.join('丁');
+  chk(evG.filter((e) => e.type === 'playerJoin' && e.name === '丁').length === 1, '丁真的加入，甲恰好收到 1 次“丁加入”');
+  await netJ.leave();
+  chk(evG.filter((e) => e.type === 'playerLeave' && e.name === '丁').length === 1, '丁真的离开，甲恰好收到 1 次“丁离开”');
+  // 上线通知 15 秒窗口（和下线同一个 helper，另一张表）：同一人 15 秒内只报一次
+  const seenJ = new Map();
+  chk(leaveNoticeDue(seenJ, '丁', 200000) === true, '上线通知第一次报');
+  chk(leaveNoticeDue(seenJ, '丁', 205000) === false, '上线通知 5 秒内不重复报');
+  chk(leaveNoticeDue(seenJ, '丁', 215000) === true, '上线通知满 15 秒后可再报');
+  await netI.leave(); await netH.leave(); await netG.leave();
 }
 
 console.log(fail ? `有 ${fail} 项失败` : '落日湾联机逻辑测试全部通过');

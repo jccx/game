@@ -41,6 +41,7 @@ export class Hud {
     this.c = {}; this.slowT = 0; this.mapT = 0; this.bannerT = 0; this.engine = null; this.saveT = 5;
     this.net = null;   // 联机：没加入时是 null，单机完全不受影响
     this._leaveSeen = new Map();   // 下线通知 15 秒窗口：名字 -> 上次报的时间（见 leaveNoticeDue）
+    this._joinSeen = new Map();    // 上线通知 15 秒窗口：和下线一样，同一个名字 15 秒内只报一次（重连重放、掉线重连不刷屏）
     this.mapImg = paintMap(sim.world, 512);
     root.innerHTML = '';
     this.build();
@@ -79,7 +80,7 @@ export class Hud {
     this.bAtk = new ActionButton(pad, { cls: 'k-main', icon: IC.fist, onDown: () => Sfx.unlock() });
     this.bEnter = new ActionButton(pad, { cls: 'k-top', icon: IC.car, label: '上车', onDown: one('enter') });
     this.bSwap = new ActionButton(pad, { cls: 'k-left', icon: IC.swap, label: '换武器', onDown: one('swap') });
-    this.bRun = new ActionButton(pad, { cls: 'k-mid', icon: IC.run, label: '跑步', onDown: () => Sfx.unlock() });   // 步行专用：按住跑（3 倍速），预算耗尽时变灰
+    this.bRun = new ActionButton(pad, { cls: 'k-mid', icon: IC.run, label: '跑步', onDown: () => { Sfx.unlock(); this.sim.toggleRun(); } });   // 步行专用：点一下开、再点一下关（锁定开关，不用按住；预算耗尽时变灰）
     this.bGas = new ActionButton(pad, { cls: 'k-main', icon: IC.gas, label: '油门', onDown: () => Sfx.unlock() });
     this.bBrake = new ActionButton(pad, { cls: 'k-left', icon: IC.brake, label: '刹车' });
     this.bExit = new ActionButton(pad, { cls: 'k-top', icon: IC.door, label: '下车', onDown: one('enter') });
@@ -114,6 +115,8 @@ export class Hud {
     if (k.hit('KeyQ')) c.swap = true;
     if (k.hit('KeyM')) this.overlay ? this.closeOverlay() : this.openMap();
     if (k.hit('Escape')) this.overlay ? this.closeOverlay() : this.openSettings();
+    // 跑步开关：按一下 Shift 切换开/关（锁定开关，不用按住；hit 只在按下那一帧触发，按住不放的重复按键不会反复切换）
+    if (k.hit('ShiftLeft') || k.hit('ShiftRight')) sim.toggleRun();
     if (!v) {
       // 步行：数字键 1~6 直接切到任意一种武器（出生就全拥有，不用解锁）
       for (let i = 0; i < WEAPONS.length; i++) if (k.hit('Digit' + (i + 1))) sim.selectWeapon(i);
@@ -121,12 +124,11 @@ export class Hud {
       const fx = Math.sin(cy), fz = Math.cos(cy);
       c.mx = fx * -jy - fz * jx; c.mz = fz * -jy + fx * jx;
       c.fire = this.bAtk.pressed || k.isDown('Space', 'KeyJ');
-      c.run = k.isDown('ShiftLeft', 'ShiftRight') || this.bRun.pressed;   // 跑步：按住 Shift（键盘）或跑步键（触屏），3 倍速；预算见 sim.runBudgetLeft
       c.rocket = false;   // 步行不发车载火箭，下车时不清会残留
       c.steer = 0; c.gas = 0; c.handbrake = false; c.pitch = 0;
       return;
     }
-    c.mx = 0; c.mz = 0; c.run = false;   // 车上不跑步
+    c.mx = 0; c.mz = 0;   // 车上不跑步（上车时 sim.enterVehicle 已经把跑步开关关了）
     const plane = v.spec.cls === 'plane', heli = v.spec.cls === 'heli';
     c.steer = clamp(jx * 1.25, -1, 1);
     let gas = this.bGas.pressed ? 1 : this.bBrake.pressed ? -1 : 0;
@@ -263,8 +265,8 @@ export class Hud {
       this.bGas.setLabel(cls === 'heli' ? '上升' : '油门');   // 直升机上油门键改名“上升”，管升降；其他车上还是油门
       this.bBrake.setLabel(cls === 'heli' ? '下降' : cls === 'plane' ? '减速' : cls === 'boat' ? '倒船' : '刹车');   // 直升机上刹车键改名“下降”
     });
-    // 跑步预算指示（每 0.1 秒刷新）：预算耗尽锁死时跑步键变灰（强制步行），回满 5 秒才重新变亮；角标显示剩余秒数（满格时不显示）
-    if (!v) { const left = sim.runBudgetLeft(); this.bRun.setEnabled(sim.runReady()); this.bRun.setBadge(left >= PLAYER.runCap ? '' : Math.ceil(left) + 's'); }
+    // 跑步预算指示（每 0.1 秒刷新）：开 = 按钮高亮、文案“跑步中”；关 = 正常、文案“跑步”；预算耗尽锁死时按钮变灰（强制步行），回满 5 秒才重新变亮；角标显示剩余秒数（满格时不显示）
+    if (!v) { const left = sim.runBudgetLeft(); this.bRun.setEnabled(sim.runReady()); this.bRun.setActive(sim.runToggle); this.bRun.setLabel(sim.runToggle ? '跑步中' : '跑步'); this.bRun.setBadge(left >= PLAYER.runCap ? '' : Math.ceil(left) + 's'); }
     set('atkIcon', p.weapon > 0, (x) => this.bAtk.setIcon(x ? IC.gun : IC.fist));
     const near = !v && !p.dead ? sim.nearestVehicle() : null;
     set('near', near ? near.id : 0, () => { this.bEnter.show(!!near); if (near) this.bEnter.setLabel(near.driver === 'npc' ? '抢车' : '上车'); });
@@ -381,7 +383,8 @@ export class Hud {
   netEvent(ev) {
     switch (ev.type) {
       case 'playerJoin':
-        toast(`${ev.name}加入了落日湾`);
+        // 上线通知也 15 秒窗口：重连重放、掉线后马上回来，同一个名字 15 秒内只报一次（和下线通知一样的窗口）
+        if (leaveNoticeDue(this._joinSeen, ev.name)) toast(`${ev.name}加入了落日湾`);
         if (this._mapCv) this.drawBigMap(this._mapCv);   // 大地图开着时马上把新玩家画上去
         break;
       case 'playerLeave': {

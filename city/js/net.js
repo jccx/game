@@ -108,6 +108,7 @@ export class Net {
     this.lastWeekCheck = 0;
     this.god = false; this.godBy = '';      // 全员无敌共享开关（godMode 节点，见 setGod）
     this.feedKeys = [];                    // 收到的击杀播报键（按到达顺序，超过 20 条就删最旧的）
+    this._playersPrimed = false;           // 刚加入时第一张玩家快照是“已经在线的人”，只记下来、不报“加入了”（不然一进联机就给每个老玩家各弹一条）
     // ---- v2：任务 ----
     this.missionStates = new Map();        // 任务 id -> 共享节点（by/byName/state/cp/left/text/t/vehicle/targets）
     this.myClaimedMissions = new Set();    // 我抢到手、还没结束的任务 id（离开时放掉）
@@ -130,6 +131,7 @@ export class Net {
     // 掉线自动清理：玩家节点、名字节点、环境快照都由服务器在断线时删掉
     try { await this.t.armPresence(uid, v.name); await this.t.armEnv(uid); } catch { /* 旧版 transport 没有 armEnv 就跳过，leave 时再删 */ }
     await this.t.setPlayer(uid, playerPayload(this.sim, v.name));
+    this._playersPrimed = false;   // 下一张快照是初次全量：里面的老玩家只记下来，不报“加入了”
     this.unsubs.push(this.t.onPlayers((all) => this._onPlayers(all || {})));
     this.unsubs.push(this.t.onBuildings((all) => this._onBuildings(all || {})));
     this.unsubs.push(this.t.onVehicles((all) => this._onVehicles(all || {})));
@@ -155,9 +157,13 @@ export class Net {
     if (this.status !== 'online') return;
     const now = Date.now();
     this.pubAcc += dt;   // 发包节流用“游戏时间”累计（和 v1 一样）：测试里 dt 是模拟的，墙钟节流会让测试发不出去
-    // 超过 10 秒没更新的远端玩家当掉线（onDisconnect 正常会清掉，这是兜底）；每帧都扫一遍，玩家数很少，不用节流
+    // 超过 10 秒没收到远端玩家的新同步包就当掉线（onDisconnect 正常会清掉，这是兜底）；每帧都扫一遍，玩家数很少，不用节流。
+    // 注意：看的是本地收到“新包”的时间（seenAt），不是包里对方的墙钟（updatedAt）——对方手机时钟和我差几分钟是常事，
+    // 用对方的墙钟算：对方时钟比我快，updatedAt 一直在未来，掉线了也永远不触发兜底，地图上一直留着他（2026-11-25 用户报的幽灵）；
+    // 对方时钟比我慢，updatedAt 一直是过去，人在玩着也被当掉线，下一张快照又加回来，来回报离开/加入（2026-11-25 用户报的无故通知）。
+    // seenAt 只在对方真的发了新包时才刷新（updatedAt 的值变了才算新包）：别人发包触发的整张快照重放不算，不然只要有人在发心跳，所有人的 seenAt 都一直新鲜，兜底永远不触发。
     for (const [uid, rp] of this.remotePlayers) {
-      if (now - rp.updatedAt > 10000) { this.remotePlayers.delete(uid); this.onEvent({ type: 'playerLeave', name: rp.name }); }
+      if (now - (rp.seenAt || rp.updatedAt) > 10000) { this.remotePlayers.delete(uid); this.onEvent({ type: 'playerLeave', name: rp.name }); }
     }
     this.publish();
     this.flushBuildings();
@@ -235,6 +241,7 @@ export class Net {
     this.isHost = false; this.hostUid = null;
     this.god = false; this.godBy = '';
     this.remotePlayers.clear();
+    this._playersPrimed = false;   // 下次加入时第一张快照重新当“已经在线的人”处理
     this.status = 'offline';
     if (uid) {
       this.sim.goOffline();   // 镜像行人/警车转回本地，单机继续玩（也清掉 netGod）
@@ -561,6 +568,8 @@ export class Net {
   /* ------------------------------------------------------------ 收到远端状态 */
 
   _onPlayers(all) {
+    // 初次全量快照（刚加入 / 重连后重放）：里面的玩家早就在线了，只记下来，不报“加入了”；之后的新面孔才报。
+    const priming = !this._playersPrimed; this._playersPrimed = true;
     const seen = new Set();
     for (const uid in all) {
       if (uid === this.uid) continue;   // 自己的回声不要
@@ -569,16 +578,19 @@ export class Net {
       seen.add(uid);
       const prev = this.remotePlayers.get(uid);
       if (prev) {
+        // 对方真的发了新包（updatedAt 的值变了）才刷新本地收到时间：整张快照重放（别人发包、重连）不算新包，
+        // 不然只要有人在发心跳，所有人的 seenAt 都一直新鲜，10 秒兜底永远不触发，掉线的人一直留在地图上。
+        const fresh = d.updatedAt === undefined || d.updatedAt !== prev.updatedAt;
         // 估算移动速度（警察瞄准、警车追捕用）：两次位置之间的位移除以间隔，抖动大时取上限 30
         const dt = Math.max(0.05, (Date.now() - (prev.seenAt || Date.now())) / 1000);
         const sp = Math.min(30, Math.hypot(d.x - prev.x, d.z - prev.z) / dt);
         prev.px = prev.x; prev.py = prev.y; prev.pz = prev.z;   // 留上一帧位置给渲染插值
         Object.assign(prev, d);
         prev.speed = sp;
-        prev.seenAt = Date.now();
+        if (fresh) prev.seenAt = Date.now();
       } else {
         this.remotePlayers.set(uid, { ...d, px: d.x, py: d.y, pz: d.z, seenAt: Date.now() });
-        this.onEvent({ type: 'playerJoin', name: d.name });
+        if (!priming) this.onEvent({ type: 'playerJoin', name: d.name });
       }
     }
     for (const [uid, rp] of this.remotePlayers) {
